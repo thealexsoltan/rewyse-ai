@@ -133,6 +133,23 @@ Every phase pauses for your approval. You can go back, revise, or skip ahead. If
 
 ---
 
+## Transcribing a YouTube Channel
+
+Need someone's back catalogue as source material? `scripts/transcribe-channel.mjs`
+pulls the transcript of every video on a channel into clean Markdown:
+
+```bash
+pip install -U yt-dlp
+node scripts/transcribe-channel.mjs --channel @SomeChannel
+```
+
+Output lands in `output/<channel>/` as one Markdown file per video, plus a
+combined `corpus.md`. Runs are resumable. See
+[TRANSCRIBE-CHANNEL.md](TRANSCRIBE-CHANNEL.md) for backends, filtering
+(Shorts vs long-form) and troubleshooting.
+
+---
+
 ## Tips for Best Results
 
 1. **Be specific about your niche.** "Fitness" is too broad. "Hyrox race nutrition for beginner athletes" is perfect.
