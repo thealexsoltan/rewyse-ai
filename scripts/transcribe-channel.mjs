@@ -617,6 +617,37 @@ export function formatTimestamp(seconds) {
 
 // --------------------------------------------------- transcripts: yt-dlp backend
 
+/**
+ * Work out why yt-dlp produced no subtitle file. The distinction matters: a
+ * video with captions disabled is settled and should not be retried, but
+ * YouTube throttling or bot-gating the whole IP is transient and affects every
+ * video — reporting that as "no caption track" hides an infrastructure problem
+ * behind 219 identical per-video failures.
+ */
+export function classifyYtDlpFailure(stderr = '') {
+  const text = String(stderr);
+  const lastLine = text.trim().split('\n').filter(Boolean).slice(-1)[0] ?? '';
+
+  // Whole-IP problems: retryable, and worth naming loudly.
+  if (/sign in to confirm|not a bot|HTTP Error 429|Too Many Requests/i.test(text)) {
+    const error = new Error(
+      'YouTube is rate-limiting or bot-gating this IP, not a caption problem — ' +
+      'retry from a different network, lower --concurrency, or use --transcripts supadata',
+    );
+    error.botGated = true;
+    return error;
+  }
+  if (/HTTP Error 5\d\d|timed out|Connection reset|Temporary failure/i.test(text)) {
+    return new Error(`transient network failure: ${lastLine}`);
+  }
+
+  // Settled, per-video conditions: no point retrying.
+  const settled = /private video|video unavailable|has been removed|members-only|age-restricted|not available in your country/i;
+  const error = new Error(settled.test(text) ? lastLine : 'no caption track available');
+  error.fatal = true;
+  return error;
+}
+
 async function fetchTranscriptYtDlp(video, { lang, tempRoot }) {
   const workdir = path.join(tempRoot, video.videoId);
   await mkdir(workdir, { recursive: true });
@@ -635,14 +666,7 @@ async function fetchTranscriptYtDlp(video, { lang, tempRoot }) {
 
     const files = existsSync(workdir) ? await readdir(workdir) : [];
     const subtitle = files.find((f) => f.endsWith('.json3')) ?? files.find((f) => f.endsWith('.vtt'));
-    if (!subtitle) {
-      const reason = /private|unavailable|removed|members-only|age/i.test(result.stderr)
-        ? result.stderr.trim().split('\n').slice(-1)[0]
-        : 'no caption track available';
-      const error = new Error(reason);
-      error.fatal = true;   // missing captions won't appear on a retry
-      throw error;
-    }
+    if (!subtitle) throw classifyYtDlpFailure(result.stderr);
 
     const raw = await readFile(path.join(workdir, subtitle), 'utf8');
     const segments = subtitle.endsWith('.json3') ? parseJson3(raw) : parseVtt(raw);
@@ -879,8 +903,17 @@ async function main() {
 
   const total = manifest.videos.length;
   let completed = 0;
+  let botGatedFailures = 0;
 
   await pooled(manifest.videos, opts.concurrency, async (entry) => {
+    // Once YouTube has gated the IP every remaining fetch fails the same way;
+    // stop rather than marking the whole channel as caption-less.
+    if (botGatedFailures >= 5) {
+      entry.status = 'failed';
+      entry.error = 'skipped — YouTube gated this IP';
+      return;
+    }
+
     const target = path.join(outDir, 'transcripts', entry.file);
     if (!opts.force && existsSync(target)) {
       entry.status = 'ok';
@@ -909,6 +942,7 @@ async function main() {
       entry.error = error.message;
       completed++;
       log(`[${completed}/${total}] FAIL ${entry.videoId}  ${error.message}`);
+      if (error.botGated) botGatedFailures++;
     }
     // Checkpoint after every video so an interrupted run loses nothing.
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
@@ -929,6 +963,12 @@ async function main() {
       JSON.stringify(failed.map((v) => ({ videoId: v.videoId, title: v.title, error: v.error })), null, 2),
       'utf8',
     );
+  }
+
+  if (botGatedFailures >= 5) {
+    log(`\nSTOPPED: YouTube rate-limited or bot-gated this machine after ${botGatedFailures} videos.`);
+    log(`This is not a caption problem. Re-run from a home/office network, or use`);
+    log(`--transcripts supadata with a SUPADATA_API_KEY. Completed transcripts are kept.`);
   }
 
   const words = ok.reduce((sum, v) => sum + (v.wordCount ?? 0), 0);

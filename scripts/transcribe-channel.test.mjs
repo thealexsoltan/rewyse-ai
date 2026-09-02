@@ -18,6 +18,7 @@ import {
   parseJson3,
   parseVtt,
   parseYtDlpTab,
+  classifyYtDlpFailure,
   dedupeRolling,
   segmentsToText,
   formatTimestamp,
@@ -270,4 +271,39 @@ test('parseYtDlpTab reads Shorts entries given only a URL', () => {
   assert.equal(videos.length, 1);
   assert.equal(videos[0].videoId, 'ccccccccccc');
   assert.equal(videos[0].tab, 'shorts');
+});
+
+test('classifyYtDlpFailure separates IP gating from genuinely absent captions', () => {
+  // Whole-IP gating: retryable, and must not be reported as a caption problem.
+  for (const stderr of [
+    'ERROR: [youtube] abc: Sign in to confirm you\u2019re not a bot. Use --cookies-from-browser',
+    'WARNING: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests',
+  ]) {
+    const error = classifyYtDlpFailure(stderr);
+    assert.equal(error.botGated, true, stderr);
+    assert.notEqual(error.fatal, true, 'IP gating must stay retryable');
+    assert.match(error.message, /rate-limiting or bot-gating/);
+    assert.doesNotMatch(error.message, /no caption track/);
+  }
+
+  // Transient network trouble: retryable, not fatal.
+  const transient = classifyYtDlpFailure('ERROR: unable to download: HTTP Error 503: Service Unavailable');
+  assert.notEqual(transient.fatal, true);
+  assert.notEqual(transient.botGated, true);
+
+  // Settled per-video conditions: fatal, retrying cannot help.
+  for (const stderr of [
+    'ERROR: [youtube] abc: Private video. Sign in if you have been granted access',
+    'ERROR: [youtube] abc: Video unavailable',
+    'ERROR: [youtube] abc: Join this channel to get access to members-only content',
+  ]) {
+    const error = classifyYtDlpFailure(stderr);
+    assert.equal(error.fatal, true, stderr);
+    assert.notEqual(error.botGated, true, stderr);
+  }
+
+  // Nothing diagnostic in stderr means the video simply has no captions.
+  const none = classifyYtDlpFailure('');
+  assert.equal(none.fatal, true);
+  assert.equal(none.message, 'no caption track available');
 });
