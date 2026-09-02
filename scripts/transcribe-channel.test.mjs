@@ -17,6 +17,7 @@ import {
   parseChannelRef,
   parseJson3,
   parseVtt,
+  parseYtDlpTab,
   dedupeRolling,
   segmentsToText,
   formatTimestamp,
@@ -235,4 +236,38 @@ test('pooled preserves order and respects the concurrency ceiling', async () => 
   assert.deepEqual(results, items.map((i) => i * 2));
   assert.ok(peak <= 4, `peak concurrency was ${peak}`);
   assert.deepEqual(await pooled([], 4, async () => 1), []);
+});
+
+test('parseYtDlpTab tolerates the shapes yt-dlp actually emits', () => {
+  // An empty channel tab (e.g. a channel with no live streams) prints literal null.
+  assert.deepEqual(parseYtDlpTab(null, 'streams'), []);
+  assert.deepEqual(parseYtDlpTab(undefined, 'streams'), []);
+  assert.deepEqual(parseYtDlpTab({}, 'streams'), []);
+  assert.deepEqual(parseYtDlpTab({ entries: null }, 'streams'), []);
+
+  // Entries can be nested one level deep (tab -> playlist -> videos).
+  const nested = {
+    channel: 'Daniel Iles',
+    channel_id: 'UCTt7n8GFS6x_Tc_nAzSiK8Q',
+    entries: [
+      { entries: [{ id: 'aaaaaaaaaaa', title: 'Nested One', duration: 523.4, upload_date: '20240309' }] },
+      { id: 'bbbbbbbbbbb', title: 'Flat One', duration: null },
+      null,
+      { id: 'not-a-video-id', title: 'Junk' },
+    ],
+  };
+  const videos = parseYtDlpTab(nested, 'videos');
+  assert.deepEqual(videos.map((v) => v.videoId), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
+  assert.equal(videos[0].durationSeconds, 523);        // rounded
+  assert.equal(videos[0].publishedAt, '2024-03-09');   // YYYYMMDD -> ISO
+  assert.equal(videos[0].tab, 'videos');
+  assert.equal(videos[1].durationSeconds, null);
+});
+
+test('parseYtDlpTab reads Shorts entries given only a URL', () => {
+  const payload = { entries: [{ url: 'https://www.youtube.com/shorts/ccccccccccc', title: 'A Short' }] };
+  const videos = parseYtDlpTab(payload, 'shorts');
+  assert.equal(videos.length, 1);
+  assert.equal(videos[0].videoId, 'ccccccccccc');
+  assert.equal(videos[0].tab, 'shorts');
 });

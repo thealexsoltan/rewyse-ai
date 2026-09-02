@@ -355,6 +355,38 @@ async function ensureYtDlp() {
   return probe.stdout.trim();
 }
 
+/**
+ * Turn one parsed yt-dlp channel-tab payload into video entries.
+ * Tolerates the shapes yt-dlp actually emits: a null payload for an empty tab,
+ * a missing entries array, and entries nested one level (tab -> playlist).
+ */
+export function parseYtDlpTab(payload, tab) {
+  if (!payload || typeof payload !== 'object') return [];
+
+  const flatten = (entries) => (Array.isArray(entries) ? entries : []).flatMap((entry) => (
+    Array.isArray(entry?.entries) ? flatten(entry.entries) : [entry]
+  ));
+
+  const videos = [];
+  for (const entry of flatten(payload.entries)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const videoId = extractVideoId(entry.id ?? entry.url ?? '');
+    if (!videoId) continue;
+    videos.push({
+      videoId,
+      title: entry.title ?? videoId,
+      publishedAt: entry.upload_date
+        ? `${entry.upload_date.slice(0, 4)}-${entry.upload_date.slice(4, 6)}-${entry.upload_date.slice(6, 8)}`
+        : null,
+      description: entry.description ?? '',
+      durationSeconds: entry.duration != null ? Math.round(entry.duration) : null,
+      viewCount: entry.view_count ?? null,
+      tab,
+    });
+  }
+  return videos;
+}
+
 async function listViaYtDlp(channelRef) {
   const version = await ensureYtDlp();
   log(`listing with yt-dlp ${version} (this can take a minute on a large channel)…`);
@@ -391,27 +423,16 @@ async function listViaYtDlp(channelRef) {
       continue;
     }
 
-    // A channel tab can nest entries one level deep (tab -> playlist -> videos).
-    const flatten = (entries) => (entries ?? []).flatMap((entry) => (
-      Array.isArray(entry?.entries) ? flatten(entry.entries) : [entry]
-    ));
+    // An empty tab makes yt-dlp print the literal `null`, which parses fine.
+    if (!payload || typeof payload !== 'object') {
+      log(`  ${tab}: none`);
+      continue;
+    }
 
     let added = 0;
-    for (const entry of flatten(payload.entries)) {
-      if (!entry) continue;
-      const videoId = extractVideoId(entry.id ?? entry.url ?? '');
-      if (!videoId || byId.has(videoId)) continue;
-      byId.set(videoId, {
-        videoId,
-        title: entry.title ?? videoId,
-        publishedAt: entry.upload_date
-          ? `${entry.upload_date.slice(0, 4)}-${entry.upload_date.slice(4, 6)}-${entry.upload_date.slice(6, 8)}`
-          : null,
-        description: entry.description ?? '',
-        durationSeconds: entry.duration != null ? Math.round(entry.duration) : null,
-        viewCount: entry.view_count ?? null,
-        tab,
-      });
+    for (const video of parseYtDlpTab(payload, tab)) {
+      if (byId.has(video.videoId)) continue;
+      byId.set(video.videoId, video);
       added++;
     }
     log(`  ${tab}: ${added}`);
