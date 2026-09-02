@@ -359,37 +359,49 @@ async function listViaYtDlp(channelRef) {
   const version = await ensureYtDlp();
   log(`listing with yt-dlp ${version} (this can take a minute on a large channel)…`);
 
-  const url = `${channelUrl(channelRef)}/videos`;
-  const result = await run('yt-dlp', [
-    '--flat-playlist',
-    '--dump-single-json',
-    '--ignore-errors',
-    '--no-warnings',
-    url,
-  ], { timeout: 900000 });
+  // A channel's uploads are split across tabs: /videos holds long-form, /shorts
+  // holds Shorts, /streams holds past live streams. Listing only /videos misses
+  // most of a Shorts-heavy channel, so walk all three and merge.
+  const base = channelUrl(channelRef);
+  const tabs = ['videos', 'shorts', 'streams'];
+  const byId = new Map();
+  let info = null;
 
-  if (result.code !== 0 && !result.stdout.trim()) {
-    fail(`yt-dlp could not list ${url}\n${result.stderr.trim().split('\n').slice(-5).join('\n')}`);
-  }
+  for (const tab of tabs) {
+    const url = `${base}/${tab}`;
+    const result = await run('yt-dlp', [
+      '--flat-playlist',
+      '--dump-single-json',
+      '--ignore-errors',
+      '--no-warnings',
+      url,
+    ], { timeout: 900000 });
 
-  let payload;
-  try {
-    payload = JSON.parse(result.stdout);
-  } catch {
-    fail(`yt-dlp returned output that is not JSON — try upgrading it (yt-dlp -U)`);
-  }
+    if (!result.stdout.trim()) {
+      // An empty tab exits non-zero — that is normal, not a failure.
+      log(`  ${tab}: none`);
+      continue;
+    }
 
-  // A channel tab can nest entries one level deep (tab -> playlist -> videos).
-  const flatten = (entries) => (entries ?? []).flatMap((entry) => (
-    Array.isArray(entry?.entries) ? flatten(entry.entries) : [entry]
-  ));
+    let payload;
+    try {
+      payload = JSON.parse(result.stdout);
+    } catch {
+      log(`  ${tab}: skipped (yt-dlp returned output that is not JSON)`);
+      continue;
+    }
 
-  const videos = flatten(payload.entries)
-    .filter((entry) => entry && (entry.id || entry.url))
-    .map((entry) => {
+    // A channel tab can nest entries one level deep (tab -> playlist -> videos).
+    const flatten = (entries) => (entries ?? []).flatMap((entry) => (
+      Array.isArray(entry?.entries) ? flatten(entry.entries) : [entry]
+    ));
+
+    let added = 0;
+    for (const entry of flatten(payload.entries)) {
+      if (!entry) continue;
       const videoId = extractVideoId(entry.id ?? entry.url ?? '');
-      if (!videoId) return null;
-      return {
+      if (!videoId || byId.has(videoId)) continue;
+      byId.set(videoId, {
         videoId,
         title: entry.title ?? videoId,
         publishedAt: entry.upload_date
@@ -398,18 +410,32 @@ async function listViaYtDlp(channelRef) {
         description: entry.description ?? '',
         durationSeconds: entry.duration != null ? Math.round(entry.duration) : null,
         viewCount: entry.view_count ?? null,
-      };
-    })
-    .filter(Boolean);
+        tab,
+      });
+      added++;
+    }
+    log(`  ${tab}: ${added}`);
 
-  const info = {
-    channelId: payload.channel_id ?? payload.uploader_id ?? null,
-    title: payload.channel ?? payload.title ?? String(channelRef),
-    handle: payload.uploader_id ?? null,
-    videoCount: videos.length,
+    if (!info && (payload.channel || payload.channel_id)) {
+      info = {
+        channelId: payload.channel_id ?? payload.uploader_id ?? null,
+        title: payload.channel ?? String(channelRef),
+        handle: payload.uploader_id ?? null,
+      };
+    }
+  }
+
+  const videos = [...byId.values()];
+  if (!videos.length) {
+    fail(`yt-dlp found no videos on ${base} — check the channel reference, or run yt-dlp -U`);
+  }
+
+  return {
+    info: { ...(info ?? { channelId: null, title: String(channelRef), handle: null }), videoCount: videos.length },
+    videos,
   };
-  return { info, videos };
 }
+
 
 // ------------------------------------------------------------- listing: file
 
@@ -435,6 +461,7 @@ export async function listFromFile(listFile, channelRef) {
         description: entry.description ?? '',
         durationSeconds: entry.durationSeconds ?? null,
         viewCount: entry.viewCount ?? null,
+        tab: entry.tab ?? null,
       };
     }).filter(Boolean);
   } else {
@@ -689,6 +716,7 @@ export function renderMarkdown(video, transcript, channelInfo) {
     video.durationSeconds != null ? `duration_seconds: ${video.durationSeconds}` : null,
     video.viewCount != null ? `view_count: ${video.viewCount}` : null,
     `language: ${transcript.language}`,
+    video.tab ? `tab: ${video.tab}` : null,
     `transcript_source: ${transcript.backend}`,
     `word_count: ${transcript.wordCount}`,
     '---',
