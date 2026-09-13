@@ -25,6 +25,17 @@ const ZONE_LABELS = [
 ];
 const PLAN_LABELS = ['Deep work', 'Nap', 'Admin', 'Workout', 'Wind down'];
 
+/** Zone titles as the HTML timeline shows them (kind-keyed display titles). */
+const HTML_ZONE_TITLES = [
+  'Waking Grogginess',
+  'First Peak',
+  'Afternoon Dip',
+  'Second Peak',
+  'Bedtime Wind-down',
+  'Melatonin Window',
+  'Sleep',
+];
+
 test('fixture EnergyDay matches the shape the renderers rely on', () => {
   const day = makeEnergyDay();
   assert.equal(day.curve.length, 96);
@@ -142,18 +153,27 @@ test('html report: complete, self-contained document', () => {
 
   assert.ok(html.startsWith('<!doctype html>'), 'starts with a doctype');
   assert.ok(html.includes('<svg'), 'contains inline SVG');
-  assert.ok(html.includes('viewBox="0 0 960 260"'), 'energy curve uses the agreed viewBox');
+  assert.ok(/viewBox="0 0 720 \d+"/.test(html), 'the timeline uses a 720-wide viewBox');
   assert.ok(html.includes('<title>Whoop Energy — 2025-09-13</title>'), 'document title');
-  assert.ok(html.includes('prefers-color-scheme: dark'), 'theme-aware CSS');
-  assert.ok(html.includes('max-width: 960px'), 'constrained page width');
+  assert.ok(html.includes('prefers-color-scheme: light'), 'dark-first CSS with a light variant');
+  assert.ok(html.includes(':root[data-theme="light"]'), 'an explicit light theme override');
+  assert.ok(html.includes('max-width: 760px'), 'constrained page width');
 
-  // No external assets of any kind (an optional single comment may mention one).
+  // The only external asset allowed is the Google Fonts stylesheet.
   const withoutComments = html.replace(/<!--[\s\S]*?-->/g, '');
-  assert.ok(!withoutComments.includes('http'), 'no external URLs anywhere in the document');
-  assert.ok(!/<link\b/i.test(html) && !/<img\b/i.test(html), 'no linked stylesheets or images');
+  const urls = withoutComments.match(/https?:\/\/[^"'\s)]+/g) || [];
+  for (const url of urls) {
+    assert.match(url, /^https:\/\/fonts\.(googleapis|gstatic)\.com/, `only Google Fonts URLs: ${url}`);
+  }
+  const links = html.match(/<link\b[^>]*>/gi) || [];
+  assert.ok(links.length > 0 && links.length <= 3, 'only the font stylesheet (plus preconnects) is linked');
+  for (const link of links) {
+    assert.match(link, /fonts\.(googleapis|gstatic)\.com/, `link points at Google Fonts: ${link}`);
+  }
+  assert.ok(!/<img\b/i.test(html), 'no images');
   assert.ok(!/src\s*=/.test(html), 'no script or asset src attributes');
 
-  assert.ok(Buffer.byteLength(html, 'utf8') < 200 * 1024, 'document stays under 200 KB');
+  assert.ok(Buffer.byteLength(html, 'utf8') < 250 * 1024, 'document stays under 250 KB');
 });
 
 test('html report: escapes recommendation titles containing < and &', () => {
@@ -179,25 +199,26 @@ test('html report: renders zones, plan, debt bars and trends', () => {
     insights: makeInsights(),
     nights: makeNights(),
   });
-  for (const label of ZONE_LABELS) {
-    assert.ok(html.includes(escapeHtml(label)), `zone label rendered: ${label}`);
+  for (const label of HTML_ZONE_TITLES) {
+    assert.ok(html.includes(escapeHtml(label)), `zone title rendered: ${label}`);
   }
   for (const label of PLAN_LABELS) {
     assert.ok(html.includes(label), `plan activity rendered: ${label}`);
   }
-  assert.ok(html.includes('viewBox="0 0 960 240"'), 'sleep vs need chart');
+  assert.ok(html.includes('viewBox="0 0 720 236"'), 'sleep vs need chart');
   assert.ok(html.includes('Recovery, HRV and resting heart rate'), 'per-night mini sparklines');
   assert.ok(html.includes('class="bar bar-short"') || html.includes('bar bar-short'), 'shortfall bars highlighted');
-  assert.ok(html.includes('nowline'), 'now marker on the curve');
-  assert.ok(html.includes('bed 22:45'), 'target bedtime marked');
-  assert.ok(html.includes('melatonin'), 'melatonin window marked');
+  assert.ok(html.includes('nowline'), 'now marker on the timeline');
+  assert.ok(html.includes('NOW 14:20'), 'the now chip carries the time');
+  assert.ok(html.includes('22:45 bed'), 'target bedtime marked on the timeline');
+  assert.ok(html.includes('Melatonin Window'), 'melatonin window marked');
 });
 
 test('html report: readable without JavaScript', () => {
   const html = renderHtmlReport({ energyDay: makeEnergyDay(), insights: makeInsights() });
   const body = html.slice(html.indexOf('<body>'));
   const withoutScript = body.replace(/<script>[\s\S]*?<\/script>/g, '');
-  assert.ok(withoutScript.includes('Energy through the day'), 'sections survive without script');
+  assert.ok(withoutScript.includes('Circadian Energy Levels'), 'sections survive without script');
   assert.ok(withoutScript.includes('<svg'), 'charts are static SVG, not script-drawn');
   assert.ok(withoutScript.includes('Sleep debt'), 'stat tiles are static markup');
 });

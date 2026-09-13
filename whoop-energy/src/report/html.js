@@ -1,30 +1,51 @@
 /**
  * Single-file HTML report for Whoop Energy.
  *
- * The output is a complete document with inline CSS and inline SVG only: no
- * external stylesheets, fonts, images or script libraries, so the file works
- * offline and can be mailed around as one attachment. A tiny inline script
- * adds a hover read-out on the energy curve; every number is also present in
- * the markup, so the page is fully readable with scripting disabled.
+ * The page is a Rise-style vertical timeline: time runs top to bottom from
+ * wake (sun) to target bedtime (moon), and the curve's **x** position encodes
+ * energy across three guide columns — SLEEP (low) · DIP (mid) · PEAK (high).
+ * Every zone gets a marker on the curve and a label row to its right.
+ *
+ * The document is self-contained apart from one Google Fonts stylesheet link:
+ * all CSS and every chart is inline, there is no script at all, and the page
+ * reads correctly with the fonts blocked (the fallback stacks are sized for
+ * it) or with scripting disabled.
  *
  * @module report/html
  */
 
 import { minutesToClock } from './json.js';
 
-/** Energy-curve SVG geometry (user units inside `viewBox="0 0 960 260"`). */
-export const CURVE_VIEWBOX = { width: 960, height: 260 };
-const CURVE_PLOT = { x0: 46, x1: 944, y0: 34, y1: 218 };
+/* ── Geometry ─────────────────────────────────────────────────────────────── */
+
+/** Vertical-timeline geometry, in user units inside its own viewBox. */
+export const TIMELINE = Object.freeze({
+  width: 720,
+  hourHeight: 56,
+  padTop: 104,
+  padBottom: 64,
+  xLow: 94, // energy 0 — the SLEEP column
+  xMid: 197, // energy 50 — the DIP column
+  xHigh: 300, // energy 100 — the PEAK column
+  labelX: 356,
+  rowHeight: 110,
+  markerR: 22,
+  endpointR: 20,
+  endpointClearance: 48,
+});
 
 /** Sleep-vs-need SVG geometry. */
-export const BARS_VIEWBOX = { width: 960, height: 240 };
-const BARS_PLOT = { x0: 46, x1: 944, y0: 28, y1: 190 };
+export const BARS_VIEWBOX = Object.freeze({ width: 720, height: 236 });
+const BARS_PLOT = Object.freeze({ x0: 40, x1: 706, y0: 22, y1: 178 });
 
-/** Minutes covered by the energy curve (wake to wake + 24 h). */
+/** Minutes covered by the modelled curve (wake to wake + 24 h). */
 export const CURVE_SPAN_MIN = 1440;
 
-/** Hours between labels on the energy-curve x axis. */
-export const AXIS_LABEL_STEP_HOURS = 3;
+/** Hours between horizontal gridlines on the timeline. */
+export const GRID_STEP_HOURS = 2;
+
+/** Characters per line before the advice text wraps. */
+export const ADVICE_WRAP_CHARS = 32;
 
 /** Recovery colour bands (shared with the terminal renderer). */
 export const RECOVERY_GREEN_MIN = 67;
@@ -40,18 +61,38 @@ export const ACTIVITY_LABELS = {
   bed: 'Bed',
 };
 
-/** Human labels for `zones[].kind`. */
+/** Display titles for `zones[].kind`, as shown beside the timeline. */
 export const ZONE_KIND_LABELS = {
-  grogginess: 'Grogginess',
-  morning_peak: 'Morning peak',
-  afternoon_dip: 'Afternoon dip',
-  evening_peak: 'Evening peak',
-  wind_down: 'Wind-down',
-  melatonin_window: 'Melatonin window',
+  grogginess: 'Waking Grogginess',
+  morning_peak: 'First Peak',
+  afternoon_dip: 'Afternoon Dip',
+  evening_peak: 'Second Peak',
+  wind_down: 'Bedtime Wind-down',
+  melatonin_window: 'Melatonin Window',
   sleep: 'Sleep',
 };
 
+/** Which zones read as a "peak" (orange marker); everything else is blue. */
+const PEAK_KINDS = new Set(['morning_peak', 'evening_peak']);
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_LONG = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/* ── Small helpers ────────────────────────────────────────────────────────── */
 
 /**
  * Escape text for interpolation into HTML markup or an attribute value.
@@ -104,6 +145,17 @@ function shortDate(date) {
   return `${MONTHS[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}`;
 }
 
+/** `2025-09-13` becomes `Saturday, 13 September`. Computed in UTC, so stable. */
+function longDate(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date ?? ''));
+  if (!m) return String(date ?? '');
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const weekday = WEEKDAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()] ?? '';
+  return `${weekday}, ${d} ${MONTHS_LONG[mo - 1] ?? mo}`;
+}
+
 /** Clock string, wrapping past midnight, never null in markup. */
 function clock(min) {
   return minutesToClock(min) ?? '—';
@@ -131,6 +183,46 @@ function sinceWake(min, wakeMin) {
 }
 
 /**
+ * Greedy word wrap to at most `max` lines of roughly `width` characters. The
+ * last line is ellipsised when the text does not fit.
+ *
+ * @param {string} text
+ * @param {number} [width]
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+export function wrapText(text, width = ADVICE_WRAP_CHARS, max = 2) {
+  const words = String(text ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length <= width || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+      if (lines.length === max) break;
+    }
+  }
+  if (lines.length < max && line) lines.push(line);
+  if (lines.length === max) {
+    // Anything left over is signalled with an ellipsis on the final line.
+    const used = lines.join(' ').split(/\s+/).length;
+    if (used < words.length) {
+      let last = lines[max - 1];
+      while (last.length > width - 1 && last.includes(' ')) last = last.slice(0, last.lastIndexOf(' '));
+      lines[max - 1] = `${last}…`;
+    }
+  }
+  return lines;
+}
+
+/**
  * Catmull-Rom through the points, emitted as cubic beziers, so the curve is
  * smooth without pulling away from the sampled values.
  *
@@ -155,226 +247,409 @@ function smoothPath(pts) {
   return d;
 }
 
-/* ── Sections ─────────────────────────────────────────────────────────────── */
+/** Straight-line length of a polyline — close enough to seed the draw-in. */
+function polylineLength(pts) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
+  return total;
+}
 
-/** Stat tiles row. */
-function renderTiles(energyDay) {
-  const debt = energyDay.debt || {};
-  const rec = energyDay.recovery || (energyDay.lastNight && energyDay.lastNight.recovery) || {};
+/** Linear interpolation of the 15-minute energy curve at `elapsed` minutes. */
+function energyAt(curve, elapsed) {
+  if (!curve.length) return 0;
+  const idx = num(elapsed) / 15;
+  const i0 = Math.max(0, Math.min(curve.length - 1, Math.floor(idx)));
+  const i1 = Math.max(0, Math.min(curve.length - 1, i0 + 1));
+  const f = Math.max(0, Math.min(1, idx - i0));
+  const a = num(curve[i0] && curve[i0].energy);
+  const b = num(curve[i1] && curve[i1].energy);
+  return a + (b - a) * f;
+}
+
+/* ── Inline icons (24 × 24 user units, centred on 12,12) ──────────────────── */
+
+const ICONS = {
+  arrow_up_right: '<path class="ic-stroke" d="M7.5 16.5 L16.5 7.5 M9.5 7.5 H16.5 V14.5" />',
+  arrow_down_right: '<path class="ic-stroke" d="M7.5 7.5 L16.5 16.5 M16.5 9.5 V16.5 H9.5" />',
+  arrow_down: '<path class="ic-stroke" d="M12 6 V17 M6.8 11.8 L12 17 L17.2 11.8" />',
+  bolt: '<path class="ic-fill" d="M13.4 2.6 L6 13.2 H10.7 L9.9 21.4 L17.6 10.4 H12.7 Z" />',
+  moon: '<path class="ic-fill" d="M16.4 4.2 A8.6 8.6 0 1 0 19.4 15.6 A6.9 6.9 0 0 1 16.4 4.2 Z" />',
+  sun:
+    '<circle class="ic-fill" cx="12" cy="12" r="3.6" />' +
+    '<path class="ic-stroke" d="M12 3.4 V5.6 M12 18.4 V20.6 M3.4 12 H5.6 M18.4 12 H20.6 ' +
+    'M5.9 5.9 L7.5 7.5 M16.5 16.5 L18.1 18.1 M18.1 5.9 L16.5 7.5 M7.5 16.5 L5.9 18.1" />',
+};
+
+/** Zone kind → icon name, following the reference design. */
+const ZONE_ICONS = {
+  grogginess: 'arrow_up_right',
+  morning_peak: 'bolt',
+  afternoon_dip: 'arrow_down_right',
+  evening_peak: 'bolt',
+  wind_down: 'arrow_down',
+  melatonin_window: 'moon',
+  sleep: 'moon',
+};
+
+/** An icon group translated so its 24×24 box is centred on (cx, cy). */
+function icon(name, cx, cy, scale = 1) {
+  const body = ICONS[name] || '';
+  const t = `translate(${round(cx, 1)} ${round(cy, 1)}) scale(${round(scale, 3)}) translate(-12 -12)`;
+  return `<g class="ic" transform="${t}">${body}</g>`;
+}
+
+/* ── Hero: the circadian vertical timeline ────────────────────────────────── */
+
+/**
+ * The vertical energy timeline. One SVG: guide columns, gridlines, the curve,
+ * zone markers and the label column, so both columns line up exactly.
+ *
+ * @param {object} energyDay
+ * @returns {string}
+ */
+function renderTimeline(energyDay) {
+  const T = TIMELINE;
+  const curve = Array.isArray(energyDay.curve) ? energyDay.curve : [];
+  const wakeMin = num(energyDay.wakeMin);
+  const maxElapsed = Math.max(60, (curve.length - 1) * 15);
+
+  // The hero covers wake → target bedtime only; the overnight stretch is
+  // implied by the curve arriving at the moon.
+  let span = sinceWake(energyDay.targetBedtimeMin, wakeMin);
+  if (!Number.isFinite(span) || span < 180) span = Math.min(960, maxElapsed);
+  span = Math.min(span, maxElapsed);
+
+  const xOfEnergy = (e) => T.xLow + (Math.max(0, Math.min(100, num(e))) / 100) * (T.xHigh - T.xLow);
+  const yOf = (elapsed) => T.padTop + (Math.max(0, num(elapsed)) / 60) * T.hourHeight;
+
+  // ── curve path ──────────────────────────────────────────────────────────
+  const pts = [];
+  for (let e = 0; e <= span; e += 15) pts.push({ x: xOfEnergy(energyAt(curve, e)), y: yOf(e) });
+  if (pts.length && span % 15 !== 0) pts.push({ x: xOfEnergy(energyAt(curve, span)), y: yOf(span) });
+  const path = smoothPath(pts);
+  const pathLen = Math.round(polylineLength(pts) * 1.02) + 40;
+
+  // ── zone markers ────────────────────────────────────────────────────────
+  const zones = Array.isArray(energyDay.zones) ? energyDay.zones : [];
+  const markers = zones
+    .filter((z) => z && z.kind !== 'sleep')
+    .map((zone) => {
+      const startE = sinceWake(zone.startMin, wakeMin);
+      let endE = sinceWake(zone.endMin, wakeMin);
+      if (endE <= startE) endE += 1440;
+      // Keep markers clear of the sun and moon endpoints, and recompute x from
+      // the clamped time so the marker still sits on the curve.
+      const clearance = (T.endpointClearance / T.hourHeight) * 60;
+      const midE = Math.max(
+        Math.min(clearance, span / 2),
+        Math.min(Math.max(span - clearance, span / 2), (startE + endE) / 2),
+      );
+      return {
+        kind: String(zone.kind || ''),
+        title: ZONE_KIND_LABELS[zone.kind] || String(zone.label || zone.kind || ''),
+        range: `${clock(zone.startMin)} – ${clock(zone.endMin)}`,
+        advice: String(zone.advice || ''),
+        y: yOf(midE),
+        x: xOfEnergy(energyAt(curve, midE)),
+        peak: PEAK_KINDS.has(zone.kind),
+      };
+    })
+    .sort((a, b) => a.y - b.y);
+
+  // ── label rows: one-pass downward collision resolver ────────────────────
+  let cursor = -Infinity;
+  for (const m of markers) {
+    const wanted = m.y - 30;
+    m.rowTop = Math.max(wanted, cursor);
+    m.moved = m.rowTop - wanted;
+    cursor = m.rowTop + T.rowHeight;
+  }
+
+  const timelineBottom = yOf(span);
+  const labelBottom = markers.length ? markers[markers.length - 1].rowTop + T.rowHeight : 0;
+  const height = Math.round(Math.max(timelineBottom + T.padBottom, labelBottom + 32));
+
+  // ── guides and gridlines ────────────────────────────────────────────────
+  const gridX0 = T.xLow - 16;
+  const gridX1 = T.xHigh + 28;
+  const grid = [];
+  for (let h = 0; h * 60 <= span; h += GRID_STEP_HOURS) {
+    const y = round(yOf(h * 60), 1);
+    grid.push(`        <line class="tl-grid" x1="${gridX0}" y1="${y}" x2="${gridX1}" y2="${y}" />`);
+  }
+  const columns = [
+    ['SLEEP', T.xLow],
+    ['DIP', T.xMid],
+    ['PEAK', T.xHigh],
+  ]
+    .map(
+      ([name, x]) =>
+        `        <line class="tl-guide" x1="${x}" y1="${round(yOf(0), 1)}" x2="${x}" y2="${round(
+          timelineBottom,
+          1,
+        )}" />
+        <text class="tl-col" x="${x}" y="${T.padTop - 58}" text-anchor="middle">${escapeHtml(name)}</text>`,
+    )
+    .join('\n');
+
+  // ── endpoints ───────────────────────────────────────────────────────────
+  const sunX = xOfEnergy(energyAt(curve, 0));
+  const moonX = xOfEnergy(energyAt(curve, span));
+  const endpoints = `        <g class="tl-endpoint">
+          <circle class="tl-sun" cx="${round(sunX, 1)}" cy="${round(yOf(0), 1)}" r="${T.endpointR}" />
+          ${icon('sun', sunX, yOf(0), 0.95)}
+        </g>
+        <g class="tl-endpoint">
+          <circle class="tl-moon" cx="${round(moonX, 1)}" cy="${round(timelineBottom, 1)}" r="${T.endpointR}" />
+          ${icon('moon', moonX, timelineBottom, 0.85)}
+        </g>
+        <text class="tl-edge" x="${round(sunX, 1)}" y="${round(yOf(0) - T.endpointR - 10, 1)}" text-anchor="middle">${escapeHtml(
+          clock(energyDay.wakeMin),
+        )} wake</text>
+        <text class="tl-edge" x="${round(moonX, 1)}" y="${round(
+          timelineBottom + T.endpointR + 20,
+          1,
+        )}" text-anchor="middle">${escapeHtml(clock(energyDay.targetBedtimeMin))} bed</text>`;
+
+  // ── now marker ──────────────────────────────────────────────────────────
+  let now = '';
+  if (Number.isFinite(energyDay.now) && energyDay.now !== null) {
+    const nowE = sinceWake(energyDay.now, wakeMin);
+    if (nowE <= span) {
+      const ny = round(yOf(nowE), 1);
+      now = `        <g class="nowline">
+          <line class="now-rule" x1="${gridX0}" y1="${ny}" x2="${gridX1}" y2="${ny}" />
+          <rect class="now-chip" x="4" y="${round(yOf(nowE) - 12, 1)}" width="84" height="24" rx="12" />
+          <text class="now-text" x="46" y="${round(yOf(nowE) + 4.5, 1)}" text-anchor="middle">NOW ${escapeHtml(
+            clock(energyDay.now),
+          )}</text>
+        </g>`;
+    }
+  }
+
+  // ── markers + labels ────────────────────────────────────────────────────
+  const marks = markers
+    .map((m) => {
+      const cx = round(m.x, 1);
+      const cy = round(m.y, 1);
+      const tone = m.peak ? 'peak' : 'blue';
+      const connector =
+        m.moved > 12
+          ? `\n          <path class="tl-connector" d="M ${round(m.x + T.markerR + 4, 1)} ${cy} H ${
+              T.labelX - 22
+            } V ${round(m.rowTop + 38, 1)} h 12" />`
+          : '';
+      const adviceLines = wrapText(m.advice)
+        .map(
+          (line, i) =>
+            `<tspan class="tl-advice" x="${T.labelX}" y="${round(m.rowTop + 68 + i * 20, 1)}">${escapeHtml(
+              line,
+            )}</tspan>`,
+        )
+        .join('');
+      return `        <g class="tl-zone">${connector}
+          <circle class="tl-marker tl-${tone}" cx="${cx}" cy="${cy}" r="${T.markerR}" />
+          ${icon(ZONE_ICONS[m.kind] || 'bolt', m.x, m.y, 0.92)}
+          <text class="tl-label">
+            <tspan class="tl-time" x="${T.labelX}" y="${round(m.rowTop + 14, 1)}">${escapeHtml(m.range)}</tspan>
+            <tspan class="tl-title" x="${T.labelX}" y="${round(m.rowTop + 44, 1)}">${escapeHtml(m.title)}</tspan>
+            ${adviceLines}
+          </text>
+        </g>`;
+    })
+    .join('\n');
+
+  return `    <section class="hero" aria-label="Circadian energy levels">
+      <div class="head">
+        <p class="eyebrow">Today</p>
+        <h2>Circadian Energy Levels</h2>
+        <p class="hint">Time runs down the page from wake to bed; the curve swings right as energy rises.</p>
+      </div>
+      <svg class="timeline" viewBox="0 0 ${T.width} ${height}" role="img" aria-label="Energy timeline from ${escapeHtml(
+        clock(energyDay.wakeMin),
+      )} to ${escapeHtml(clock(energyDay.targetBedtimeMin))}" style="--curve-len:${pathLen}">
+        <defs>
+          <linearGradient id="energyGradient" gradientUnits="userSpaceOnUse" x1="${T.xLow}" y1="0" x2="${
+            T.xHigh
+          }" y2="0">
+            <stop offset="0" class="stop-low" />
+            <stop offset="0.5" class="stop-mid" />
+            <stop offset="1" class="stop-peak" />
+          </linearGradient>
+        </defs>
+${grid.join('\n')}
+${columns}
+        <path class="tl-curve" d="${path}" />
+${endpoints}
+${now}
+${marks}
+      </svg>
+    </section>`;
+}
+
+/* ── Header, tiles, plan, tonight ─────────────────────────────────────────── */
+
+/** Compact top header: wordmark, big date, one-line summary. */
+function renderHeader(energyDay) {
   const night = energyDay.lastNight || {};
+  const rec = energyDay.recovery || night.recovery || {};
+  const summary = [
+    Number.isFinite(energyDay.wakeMin) ? `Woke ${clock(energyDay.wakeMin)}` : null,
+    Number.isFinite(night.asleepMin)
+      ? `${fmtDur(night.asleepMin)} slept of ${fmtDur(night.needTotalMin)} needed`
+      : null,
+    Number.isFinite(rec.score) ? `Recovery ${Math.round(rec.score)}%` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return `    <header class="top">
+      <p class="wordmark">Whoop Energy</p>
+      <h1>${escapeHtml(longDate(energyDay.date))}</h1>
+      <p class="summary">${escapeHtml(summary)}</p>
+    </header>`;
+}
+
+/** Thin recovery ring, drawn as a stroked arc. */
+function recoveryRing(score) {
+  const tone = recoveryTone(score);
+  const r = 21;
+  const c = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(100, num(score))) / 100;
+  return `<svg class="ring" viewBox="0 0 52 52" aria-hidden="true">
+          <circle class="ring-track" cx="26" cy="26" r="${r}" />
+          <circle class="ring-arc tone-${escapeHtml(tone)}" cx="26" cy="26" r="${r}" stroke-dasharray="${round(
+            c * pct,
+            1,
+          )} ${round(c, 1)}" transform="rotate(-90 26 26)" />
+        </svg>`;
+}
+
+/** Four quiet stat tiles: sleep debt, recovery, HRV, resting HR. */
+function renderTiles(energyDay, insights) {
+  const debt = energyDay.debt || {};
+  const night = energyDay.lastNight || {};
+  const rec = energyDay.recovery || night.recovery || {};
+  const ins = (insights && insights.recovery) || {};
+  const debtTone = { low: 'good', moderate: 'mid', high: 'low', severe: 'low' }[String(debt.level)] || 'none';
+  const hrvDelta = Number.isFinite(ins.hrvDeltaPct)
+    ? `${ins.hrvDeltaPct >= 0 ? '+' : '−'}${Math.abs(ins.hrvDeltaPct).toFixed(1)}% vs 7-day`
+    : 'rMSSD overnight';
+  const rhrSub = Number.isFinite(ins.rhrAvg7d) ? `7-day ${Math.round(ins.rhrAvg7d)} bpm` : 'overnight low';
+
   const tiles = [
     {
       label: 'Sleep debt',
       value: fmtHours(debt.hours),
-      sub: [debt.level, debt.trend7d ? `${debt.trend7d} vs last week` : null].filter(Boolean).join(' · '),
-      tone: null,
+      sub: debt.level ? `${debt.level}${debt.trend7d ? ` · ${debt.trend7d}` : ''}` : '',
+      tone: debtTone,
+      art: '',
     },
     {
       label: 'Recovery',
       value: Number.isFinite(rec.score) ? `${Math.round(rec.score)}%` : '—',
       sub: rec.calibrating ? 'still calibrating' : 'this morning',
       tone: recoveryTone(rec.score),
+      art: recoveryRing(rec.score),
     },
     {
       label: 'HRV',
-      value: Number.isFinite(rec.hrvMs) ? `${Math.round(rec.hrvMs)} ms` : '—',
-      sub: 'rMSSD overnight',
-      tone: null,
+      value: Number.isFinite(rec.hrvMs) ? `${Math.round(rec.hrvMs)}<span class="unit">ms</span>` : '—',
+      sub: hrvDelta,
+      tone: 'none',
+      art: '',
+      raw: true,
     },
     {
       label: 'Resting HR',
-      value: Number.isFinite(rec.rhr) ? `${Math.round(rec.rhr)} bpm` : '—',
-      sub: 'overnight low',
-      tone: null,
-    },
-    {
-      label: 'Last night',
-      value: fmtDur(night.asleepMin),
-      sub: `asleep of ${fmtDur(night.needTotalMin)} needed`,
-      tone: null,
-    },
-    {
-      label: 'Efficiency',
-      value: Number.isFinite(night.efficiencyPct) ? `${Math.round(night.efficiencyPct)}%` : '—',
-      sub: Number.isFinite(night.inBedMin) ? `${fmtDur(night.inBedMin)} in bed` : 'asleep vs in bed',
-      tone: null,
+      value: Number.isFinite(rec.rhr) ? `${Math.round(rec.rhr)}<span class="unit">bpm</span>` : '—',
+      sub: rhrSub,
+      tone: 'none',
+      art: '',
+      raw: true,
     },
   ];
+
   const items = tiles
     .map(
-      (t) => `      <div class="tile${t.tone ? ` tone-${t.tone}` : ''}">
-        <div class="tile-label">${escapeHtml(t.label)}</div>
-        <div class="tile-value">${escapeHtml(t.value)}</div>
-        <div class="tile-sub">${escapeHtml(t.sub || '')}</div>
+      (t) => `      <div class="tile tone-${escapeHtml(t.tone)}">
+        <p class="tile-label">${escapeHtml(t.label)}</p>
+        <div class="tile-main">
+          <p class="tile-value">${t.raw ? t.value : escapeHtml(t.value)}</p>
+          ${t.art}
+        </div>
+        <p class="tile-sub">${escapeHtml(t.sub || '')}</p>
       </div>`,
     )
     .join('\n');
   return `    <section class="tiles" aria-label="Key numbers">\n${items}\n    </section>`;
 }
 
-/** The energy curve, as inline SVG. */
-function renderCurve(energyDay) {
-  const curve = Array.isArray(energyDay.curve) ? energyDay.curve : [];
-  const wakeMin = num(energyDay.wakeMin);
-  const { x0, x1, y0, y1 } = CURVE_PLOT;
-  const xOfElapsed = (e) => x0 + (Math.max(0, Math.min(CURVE_SPAN_MIN, e)) / CURVE_SPAN_MIN) * (x1 - x0);
-  const xOfMin = (min) => xOfElapsed(sinceWake(min, wakeMin));
-  const yOfEnergy = (e) => y1 - (Math.max(0, Math.min(100, num(e))) / 100) * (y1 - y0);
-
-  const pts = curve.map((p, i) => ({ x: xOfElapsed(i * 15), y: yOfEnergy(p && p.energy) }));
-  const line = smoothPath(pts);
-  const area = pts.length ? `${line} L ${round(pts[pts.length - 1].x, 1)} ${y1} L ${round(pts[0].x, 1)} ${y1} Z` : '';
-
-  // Translucent zone bands with a label along the top.
-  const zones = Array.isArray(energyDay.zones) ? energyDay.zones : [];
-  const bands = zones
-    .map((zone) => {
-      const startE = sinceWake(zone.startMin, wakeMin);
-      let endE = sinceWake(zone.endMin, wakeMin);
-      if (endE <= startE) endE += 1440;
-      const bx = xOfElapsed(startE);
-      const bw = Math.max(1, xOfElapsed(endE) - bx);
-      const label = String(zone.label || ZONE_KIND_LABELS[zone.kind] || zone.kind || '');
-      const kind = escapeHtml(zone.kind || 'sleep');
-      const text =
-        bw >= 62
-          ? `\n        <text class="band-label" x="${round(bx + bw / 2, 1)}" y="24" text-anchor="middle">${escapeHtml(
-              label.length > Math.floor(bw / 6.2) ? `${label.slice(0, Math.max(3, Math.floor(bw / 6.2) - 1))}…` : label,
-            )}</text>`
-          : '';
-      return `        <rect class="band band-${kind}" x="${round(bx, 1)}" y="${y0 - 16}" width="${round(bw, 1)}" height="${
-        y1 - y0 + 16
-      }" rx="3"><title>${escapeHtml(label)} ${escapeHtml(clock(zone.startMin))}-${escapeHtml(
-        clock(zone.endMin),
-      )}</title></rect>${text}`;
-    })
-    .join('\n');
-
-  // Y grid.
-  const grid = [0, 25, 50, 75, 100]
-    .map((v) => {
-      const y = yOfEnergy(v);
-      return `        <line class="grid" x1="${x0}" y1="${round(y, 1)}" x2="${x1}" y2="${round(y, 1)}" />
-        <text class="axis" x="${x0 - 8}" y="${round(y + 4, 1)}" text-anchor="end">${v}</text>`;
-    })
-    .join('\n');
-
-  // X axis: hour ticks every 3 h from wake, wrapping past midnight.
-  const ticks = [];
-  for (let h = 0; h <= 24; h += AXIS_LABEL_STEP_HOURS) {
-    const x = xOfElapsed(h * 60);
-    ticks.push(`        <line class="tick" x1="${round(x, 1)}" y1="${y1}" x2="${round(x, 1)}" y2="${y1 + 6}" />
-        <text class="axis" x="${round(x, 1)}" y="${y1 + 20}" text-anchor="middle">${escapeHtml(
-          clock(wakeMin + h * 60),
-        )}</text>`);
-  }
-
-  // Markers: melatonin window bracket, target bedtime, now.
-  const markers = [];
-  const melatonin = zones.find((z) => z.kind === 'melatonin_window');
-  if (melatonin) {
-    const mx0 = xOfMin(melatonin.startMin);
-    const mx1 = xOfMin(melatonin.endMin);
-    markers.push(`        <rect class="melatonin" x="${round(mx0, 1)}" y="${y0 - 16}" width="${round(
-      Math.max(2, mx1 - mx0),
-      1,
-    )}" height="${y1 - y0 + 16}" rx="3" />
-        <text class="marker-label" x="${round((mx0 + mx1) / 2, 1)}" y="${y1 + 34}" text-anchor="middle">melatonin</text>`);
-  }
-  if (Number.isFinite(energyDay.targetBedtimeMin)) {
-    const bx = xOfMin(energyDay.targetBedtimeMin);
-    markers.push(`        <line class="bedline" x1="${round(bx, 1)}" y1="${y0 - 16}" x2="${round(bx, 1)}" y2="${y1}" />
-        <text class="marker-label" x="${round(bx, 1)}" y="${y0 - 22}" text-anchor="middle">bed ${escapeHtml(
-          clock(energyDay.targetBedtimeMin),
-        )}</text>`);
-  }
-  if (Number.isFinite(energyDay.now) && energyDay.now !== null) {
-    const nx = xOfMin(energyDay.now);
-    markers.push(`        <line class="nowline" x1="${round(nx, 1)}" y1="${y0 - 16}" x2="${round(nx, 1)}" y2="${
-      y1 + 4
-    }" />
-        <text class="marker-label now" x="${round(nx, 1)}" y="${y0 - 22}" text-anchor="middle">now ${escapeHtml(
-          clock(energyDay.now),
-        )}</text>`);
-  }
-
-  return `    <section class="card" aria-label="Energy curve">
-      <div class="card-head"><h2>Energy through the day</h2><p class="hint chart-hint">From wake at ${escapeHtml(
-        clock(wakeMin),
-      )} to wake tomorrow. 0-100 is relative to your own waking range.</p></div>
-      <div class="chart-wrap">
-        <svg id="energy-svg" class="chart" viewBox="0 0 ${CURVE_VIEWBOX.width} ${CURVE_VIEWBOX.height}" width="100%" role="img" aria-label="Predicted energy for the day">
-${bands}
-${grid}
-${ticks.join('\n')}
-        <path class="curve-area" d="${area}" />
-        <path class="curve-line" d="${line}" />
-${markers.join('\n')}
-        </svg>
-        <div id="energy-tip" class="tip" hidden></div>
-      </div>
-    </section>`;
-}
-
-/** Zones list with advice. */
-function renderZones(energyDay) {
-  const zones = Array.isArray(energyDay.zones) ? energyDay.zones : [];
-  if (!zones.length) return '';
-  const rows = zones
-    .map((zone) => {
-      const label = String(zone.label || ZONE_KIND_LABELS[zone.kind] || zone.kind || '');
-      return `        <li class="zone zone-${escapeHtml(zone.kind || 'sleep')}">
-          <span class="zone-time">${escapeHtml(clock(zone.startMin))}–${escapeHtml(clock(zone.endMin))}</span>
-          <span class="zone-name">${escapeHtml(label)}</span>
-          <span class="zone-advice">${escapeHtml(zone.advice || '')}</span>
-        </li>`;
-    })
-    .join('\n');
-  return `    <section class="card" aria-label="Energy zones">
-      <div class="card-head"><h2>Zones</h2></div>
-      <ul class="zones">
-${rows}
-      </ul>
-    </section>`;
-}
-
-/** "Your day" plan as a timeline list. */
+/** "Your day": time range, activity pill, reason. */
 function renderPlan(energyDay) {
   const plan = Array.isArray(energyDay.plan) ? energyDay.plan : [];
   if (!plan.length) return '';
   const rows = plan
-    .map(
-      (entry) => `        <li class="step step-${escapeHtml(entry.activity || 'admin')}">
-          <span class="step-time">${escapeHtml(clock(entry.startMin))}–${escapeHtml(clock(entry.endMin))}</span>
-          <span class="step-body">
-            <span class="step-name">${escapeHtml(ACTIVITY_LABELS[entry.activity] || entry.activity || '')}</span>
-            <span class="step-reason">${escapeHtml(entry.reason || '')}</span>
-          </span>
-        </li>`,
-    )
+    .map((entry) => {
+      const activity = String(entry.activity || 'admin');
+      return `        <li class="plan-row">
+          <span class="plan-time">${escapeHtml(clock(entry.startMin))} – ${escapeHtml(clock(entry.endMin))}</span>
+          <span class="pill act act-${escapeHtml(activity)}">${escapeHtml(
+            ACTIVITY_LABELS[activity] || activity,
+          )}</span>
+          <span class="plan-reason">${escapeHtml(entry.reason || '')}</span>
+        </li>`;
+    })
     .join('\n');
-  return `    <section class="card" aria-label="Plan for the day">
-      <div class="card-head"><h2>Your day</h2><p class="hint">Target bedtime ${escapeHtml(
-        clock(energyDay.targetBedtimeMin),
-      )} · target wake ${escapeHtml(clock(energyDay.targetWakeMin))}</p></div>
-      <ol class="timeline">
+  return `    <section aria-label="Plan for the day">
+      <div class="head"><p class="eyebrow">Plan</p><h2>Your day</h2></div>
+      <ol class="plan">
 ${rows}
       </ol>
     </section>`;
 }
 
-/** 14-day sleep-vs-need bar chart. */
+/** "Tonight": target bedtime and target wake, side by side. */
+function renderTonight(energyDay) {
+  const sleepZone = (Array.isArray(energyDay.zones) ? energyDay.zones : []).find((z) => z && z.kind === 'sleep');
+  const glyph = (name) =>
+    `<svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  const note = sleepZone && sleepZone.advice ? sleepZone.advice : '';
+  return `    <section aria-label="Tonight">
+      <div class="head"><p class="eyebrow">Tonight</p><h2>Sleep</h2></div>
+      <div class="tonight">
+        <div class="tonight-half">
+          ${glyph('moon')}
+          <div>
+            <p class="tonight-label">Target bedtime</p>
+            <p class="tonight-value">${escapeHtml(clock(energyDay.targetBedtimeMin))}</p>
+          </div>
+        </div>
+        <div class="tonight-half">
+          ${glyph('sun')}
+          <div>
+            <p class="tonight-label">Target wake</p>
+            <p class="tonight-value">${escapeHtml(clock(energyDay.targetWakeMin))}</p>
+          </div>
+        </div>
+      </div>
+      ${note ? `<p class="tonight-note">${escapeHtml(note)}</p>` : ''}
+    </section>`;
+}
+
+/* ── Charts and insights ──────────────────────────────────────────────────── */
+
+/** 14-night sleep-vs-need bars with a need marker and a tinted shortfall. */
 function renderDebtBars(insights) {
-  const byDay = Array.isArray(insights && insights.debt && insights.debt.byDay)
-    ? insights.debt.byDay
-    : [];
+  const byDay = Array.isArray(insights && insights.debt && insights.debt.byDay) ? insights.debt.byDay : [];
   if (!byDay.length) return '';
   const { x0, x1, y0, y1 } = BARS_PLOT;
   const maxMin = Math.max(...byDay.map((d) => Math.max(num(d.needMin), num(d.asleepMin))), 60);
   const scaleTop = Math.ceil(maxMin / 60) * 60;
   const yOf = (m) => y1 - (Math.max(0, num(m)) / scaleTop) * (y1 - y0);
   const slot = (x1 - x0) / byDay.length;
-  const barW = Math.min(38, slot * 0.62);
+  const barW = Math.min(26, slot * 0.56);
 
   const grid = [];
   for (let h = 0; h <= scaleTop / 60; h += 2) {
@@ -389,27 +664,28 @@ function renderDebtBars(insights) {
       const bx = cx - barW / 2;
       const top = yOf(day.asleepMin);
       const needY = yOf(day.needMin);
-      // `deltaMin` is need − asleep (positive = shortfall); displayed flipped
-      // so a reader sees −0h39 for a night that came up short.
+      // `deltaMin` is need − asleep (positive = shortfall); shown flipped, so a
+      // reader sees −0h39 for a night that came up short.
       const short = num(day.deltaMin) > 0;
-      const shownDelta = -num(day.deltaMin);
+      const shortfall = short
+        ? `\n          <rect class="shortfall" x="${round(bx, 1)}" y="${round(needY, 1)}" width="${round(
+            barW,
+            1,
+          )}" height="${round(Math.max(1, top - needY), 1)}" rx="3" />`
+        : '';
       return `        <g class="bar-group">
           <title>${escapeHtml(shortDate(day.date))}: ${escapeHtml(fmtDur(day.asleepMin))} asleep of ${escapeHtml(
             fmtDur(day.needMin),
-          )} needed (${escapeHtml(fmtSignedDur(shownDelta))})</title>
+          )} needed (${escapeHtml(fmtSignedDur(-num(day.deltaMin)))})</title>${shortfall}
           <rect class="bar${short ? ' bar-short' : ''}" x="${round(bx, 1)}" y="${round(top, 1)}" width="${round(
             barW,
             1,
           )}" height="${round(Math.max(1, y1 - top), 1)}" rx="3" />
-          <line class="need-mark" x1="${round(bx - 3, 1)}" y1="${round(needY, 1)}" x2="${round(
-            bx + barW + 3,
+          <line class="need-mark" x1="${round(bx - 4, 1)}" y1="${round(needY, 1)}" x2="${round(
+            bx + barW + 4,
             1,
           )}" y2="${round(needY, 1)}" />
-          <text class="bar-delta${short ? ' short' : ''}" x="${round(cx, 1)}" y="${round(
-            Math.min(top, needY) - 7,
-            1,
-          )}" text-anchor="middle">${escapeHtml(fmtSignedDur(shownDelta))}</text>
-          <text class="axis" x="${round(cx, 1)}" y="${y1 + 18}" text-anchor="middle">${escapeHtml(
+          <text class="axis bar-date${i % 2 ? ' bar-date-alt' : ''}" x="${round(cx, 1)}" y="${y1 + 20}" text-anchor="middle">${escapeHtml(
             shortDate(day.date),
           )}</text>
         </g>`;
@@ -427,15 +703,15 @@ function renderDebtBars(insights) {
     )
     .join('\n');
 
-  return `    <section class="card" aria-label="Sleep versus need">
-      <div class="card-head"><h2>Sleep vs need</h2><p class="hint chart-hint">Bars are time asleep; the thin marker is that night's need. Shortfalls are highlighted.</p></div>
-      <div class="chart-wrap">
-      <svg class="chart" viewBox="0 0 ${BARS_VIEWBOX.width} ${BARS_VIEWBOX.height}" width="100%" role="img" aria-label="Time asleep against sleep need for each of the last nights">
+  return `    <section aria-label="Sleep versus need">
+      <div class="head"><p class="eyebrow">Last ${escapeHtml(String(byDay.length))} nights</p><h2>Sleep vs need</h2>
+        <p class="hint">Bars are time asleep; the thin marker is that night's need, and the gap above a short bar is tinted.</p>
+      </div>
+      <svg class="bars" viewBox="0 0 ${BARS_VIEWBOX.width} ${BARS_VIEWBOX.height}" role="img" aria-label="Time asleep against sleep need for each of the last nights">
 ${grid.join('\n')}
         <line class="axis-line" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" />
 ${bars}
       </svg>
-      </div>
       <details class="data-table">
         <summary>Show the numbers</summary>
         <table>
@@ -456,32 +732,31 @@ function miniSparkline(title, values, unit, formatValue) {
   const max = Math.max(...pts);
   const span = max - min || 1;
   const W = 300;
-  const H = 64;
+  const H = 60;
   const px = 6;
   const coords = values.map((v, i) => ({
     x: px + (i / Math.max(1, values.length - 1)) * (W - px * 2),
-    y: Number.isFinite(v) ? H - 12 - ((v - min) / span) * (H - 26) : null,
+    y: Number.isFinite(v) ? H - 10 - ((v - min) / span) * (H - 22) : null,
   }));
   const usable = coords.filter((c) => c.y !== null);
-  const path = smoothPath(usable);
   const last = usable[usable.length - 1];
   return `        <figure class="mini">
           <figcaption><span class="mini-title">${escapeHtml(title)}</span><span class="mini-last">${escapeHtml(
             formatValue(pts[pts.length - 1]),
           )}${unit === '%' ? '' : ' '}${escapeHtml(unit)}</span></figcaption>
-          <svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${escapeHtml(
-            title,
-          )} per night, from ${escapeHtml(formatValue(min))} to ${escapeHtml(formatValue(max))} ${escapeHtml(unit)}">
-            <path class="mini-line" d="${path}" />
+          <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(title)} per night, from ${escapeHtml(
+            formatValue(min),
+          )} to ${escapeHtml(formatValue(max))} ${escapeHtml(unit)}">
+            <path class="mini-line" d="${smoothPath(usable)}" />
             <circle class="mini-dot" cx="${round(last.x, 1)}" cy="${round(last.y, 1)}" r="3.2" />
           </svg>
-          <div class="mini-range"><span>low ${escapeHtml(formatValue(min))}</span><span>high ${escapeHtml(
+          <p class="mini-range"><span>low ${escapeHtml(formatValue(min))}</span><span>high ${escapeHtml(
             formatValue(max),
-          )}</span></div>
+          )}</span></p>
         </figure>`;
 }
 
-/** Recovery / HRV / RHR mini sparklines built from the raw nights. */
+/** Recovery / HRV / RHR sparklines built from the raw nights. */
 function renderNightTrends(nights) {
   const list = Array.isArray(nights) ? nights.filter((n) => n && n.recovery) : [];
   if (list.length < 2) return '';
@@ -493,73 +768,19 @@ function renderNightTrends(nights) {
     .filter(Boolean)
     .join('\n');
   if (!figures) return '';
-  return `    <section class="card" aria-label="Recovery trends">
-      <div class="card-head"><h2>Recovery, HRV and resting heart rate</h2><p class="hint">One point per night, oldest on the left (${escapeHtml(
-        shortDate(list[0].date),
-      )} to ${escapeHtml(shortDate(list[list.length - 1].date))}).</p></div>
+  return `    <section aria-label="Recovery trends">
+      <div class="head"><p class="eyebrow">Trend</p><h2>Recovery, HRV and resting heart rate</h2>
+        <p class="hint">One point per night, oldest on the left (${escapeHtml(shortDate(list[0].date))} to ${escapeHtml(
+          shortDate(list[list.length - 1].date),
+        )}).</p>
+      </div>
       <div class="minis">
 ${figures}
       </div>
     </section>`;
 }
 
-/** Correlations, each with a magnitude bar. */
-function renderCorrelations(insights) {
-  const items = Array.isArray(insights && insights.correlations) ? insights.correlations : [];
-  if (!items.length) return '';
-  const rows = items
-    .map((c) => {
-      const r = Number(c.r);
-      const pct = Math.min(100, Math.abs(Number.isFinite(r) ? r : 0) * 100);
-      return `        <li class="corr">
-          <div class="corr-head"><span class="corr-pair">${escapeHtml(c.x)} <span class="corr-vs">vs</span> ${escapeHtml(
-            c.y,
-          )}</span><span class="corr-r">r = ${escapeHtml(Number.isFinite(r) ? r.toFixed(2) : '—')} · n = ${escapeHtml(
-            String(num(c.n)),
-          )}</span></div>
-          <div class="corr-bar"><span class="corr-fill${r < 0 ? ' neg' : ''}" style="width:${round(
-            pct,
-            0,
-          )}%"></span></div>
-          <p class="corr-reading">${escapeHtml(c.reading || '')}</p>
-        </li>`;
-    })
-    .join('\n');
-  return `    <section class="card" aria-label="Correlations">
-      <div class="card-head"><h2>What moves with what</h2><p class="hint">Pearson correlation across the window; only associations worth a second look are listed.</p></div>
-      <ul class="corrs">
-${rows}
-      </ul>
-    </section>`;
-}
-
-/** Ranked recommendations as cards. */
-function renderRecommendations(insights) {
-  const items = Array.isArray(insights && insights.recommendations) ? insights.recommendations : [];
-  if (!items.length) return '';
-  const cards = items
-    .map((rec, i) => {
-      const impact = String(rec.impact || 'medium');
-      return `        <li class="rec impact-${escapeHtml(impact)}">
-          <div class="rec-head">
-            <span class="rec-rank">${escapeHtml(String(Number.isFinite(rec.rank) ? rec.rank : i + 1))}</span>
-            <h3>${escapeHtml(rec.title || '')}</h3>
-            <span class="pill">${escapeHtml(impact)} impact</span>
-          </div>
-          <p class="rec-why">${escapeHtml(rec.why || '')}</p>
-          <p class="rec-action">${escapeHtml(rec.action || '')}</p>
-        </li>`;
-    })
-    .join('\n');
-  return `    <section class="card" aria-label="Recommendations">
-      <div class="card-head"><h2>What to optimize</h2></div>
-      <ul class="recs">
-${cards}
-      </ul>
-    </section>`;
-}
-
-/** Window summary strip for the insights half of the report. */
+/** Consistency / quality / recovery as a two-column definition list. */
 function renderInsightsSummary(insights) {
   if (!insights) return '';
   const c = insights.consistency || {};
@@ -586,9 +807,9 @@ function renderInsightsSummary(insights) {
         .join(' · '),
     ],
     [
-      'Trends',
+      'Recovery',
       [
-        Number.isFinite(r.avg) ? `recovery ${Math.round(r.avg)}% (7-day ${Math.round(num(r.avg7d))}%)` : null,
+        Number.isFinite(r.avg) ? `average ${Math.round(r.avg)}% (7-day ${Math.round(num(r.avg7d))}%)` : null,
         Number.isFinite(r.hrvAvg)
           ? `HRV ${Math.round(r.hrvAvg)} ms (7-day ${Math.round(num(r.hrvAvg7d))} ms, ${
               num(r.hrvDeltaPct) >= 0 ? '+' : '−'
@@ -600,240 +821,330 @@ function renderInsightsSummary(insights) {
         .join(' · '),
     ],
   ]
-    .map(
-      ([k, v]) =>
-        `        <div class="summary-row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`,
-    )
+    .map(([k, v]) => `        <div class="dl-row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`)
     .join('\n');
-  return `    <section class="card" aria-label="Window summary">
-      <div class="card-head"><h2>Last ${escapeHtml(String(num(insights.windowDays)))} days</h2></div>
-      <dl class="summary">
+  return `    <section aria-label="Window summary">
+      <div class="head"><p class="eyebrow">Insights</p><h2>Last ${escapeHtml(
+        String(num(insights.windowDays)),
+      )} days</h2></div>
+      <dl class="dl">
 ${rows}
       </dl>
     </section>`;
 }
 
-/* ── Styles and script ────────────────────────────────────────────────────── */
+/** Correlations, as plain sentences. */
+function renderCorrelations(insights) {
+  const items = Array.isArray(insights && insights.correlations) ? insights.correlations : [];
+  if (!items.length) return '';
+  const rows = items
+    .map((c) => {
+      const r = Number(c.r);
+      return `        <li class="corr">
+          <p class="corr-pair">${escapeHtml(c.x)} <span class="corr-vs">vs</span> ${escapeHtml(c.y)}
+            <span class="corr-r">r ${escapeHtml(Number.isFinite(r) ? r.toFixed(2) : '—')} · n ${escapeHtml(
+              String(num(c.n)),
+            )}</span></p>
+          <p class="corr-reading">${escapeHtml(c.reading || '')}</p>
+        </li>`;
+    })
+    .join('\n');
+  return `    <section aria-label="Correlations">
+      <div class="head"><p class="eyebrow">Insights</p><h2>What moves with what</h2>
+        <p class="hint">Pearson correlation across the window; only associations worth a second look are listed.</p>
+      </div>
+      <ul class="corrs">
+${rows}
+      </ul>
+    </section>`;
+}
+
+/** Ranked recommendations as cards. */
+function renderRecommendations(insights) {
+  const items = Array.isArray(insights && insights.recommendations) ? insights.recommendations : [];
+  if (!items.length) return '';
+  const cards = items
+    .map((rec, i) => {
+      const impact = String(rec.impact || 'medium');
+      return `        <li class="rec">
+          <div class="rec-head">
+            <span class="rec-rank">${escapeHtml(String(Number.isFinite(rec.rank) ? rec.rank : i + 1))}</span>
+            <h3>${escapeHtml(rec.title || '')}</h3>
+            <span class="pill impact impact-${escapeHtml(impact)}">${escapeHtml(impact)} impact</span>
+          </div>
+          <p class="rec-why">${escapeHtml(rec.why || '')}</p>
+          <p class="rec-action">${escapeHtml(rec.action || '')}</p>
+        </li>`;
+    })
+    .join('\n');
+  return `    <section aria-label="Recommendations">
+      <div class="head"><p class="eyebrow">Insights</p><h2>What to optimize</h2></div>
+      <ul class="recs">
+${cards}
+      </ul>
+    </section>`;
+}
+
+/* ── Styles ───────────────────────────────────────────────────────────────── */
 
 const STYLES = `    :root {
-      color-scheme: light dark;
-      --bg: #f5f6f8;
-      --surface: #ffffff;
-      --surface-2: #f0f2f5;
-      --text: #14171c;
-      --muted: #5c6472;
-      --border: #dfe3e9;
-      --accent: #1f6f8b;
-      --accent-soft: rgba(31, 111, 139, 0.14);
-      --shortfall: #9c5b4a;
-      --good: #2f7d55;
-      --mid: #a86a12;
-      --low: #b03a2e;
-      --z-grogginess: #7b8494;
-      --z-morning_peak: #3f6fb5;
-      --z-afternoon_dip: #8d7fae;
-      --z-evening_peak: #2f8a86;
-      --z-wind_down: #6a6f96;
-      --z-melatonin_window: #5c4f86;
-      --z-sleep: #4a5260;
-      --band-alpha: 0.13;
+      color-scheme: dark;
+      --bg: #0A0C11;
+      --surface: #141822;
+      --surface-2: #1B2030;
+      --text: #F3F5F9;
+      --muted: #8E96A8;
+      --line: rgba(255, 255, 255, 0.08);
+      --peak: #FF9B3D;
+      --mid: #3FCF8E;
+      --low: #4C7DFF;
+      --marker-blue: #3D7BFF;
+      --night: #5B4BE6;
+      --good: #3FCF8E;
+      --warn: #F5B942;
+      --bad: #FF6B6B;
+      --on-marker: #FFFFFF;
+      --display: "Sora", "Segoe UI", system-ui, sans-serif;
+      --body: "Manrope", system-ui, sans-serif;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0f1216;
-        --surface: #171b21;
-        --surface-2: #1e232a;
-        --text: #e8ebf0;
-        --muted: #9aa3b1;
-        --border: #2a313a;
-        --accent: #6bc0dc;
-        --accent-soft: rgba(107, 192, 220, 0.16);
-        --shortfall: #d08a76;
-        --good: #5fbf8a;
-        --mid: #d9a441;
-        --low: #e0736a;
-        --z-grogginess: #97a1b2;
-        --z-morning_peak: #7ea6e8;
-        --z-afternoon_dip: #b0a2d4;
-        --z-evening_peak: #63bab5;
-        --z-wind_down: #9096c4;
-        --z-melatonin_window: #9d8ede;
-        --z-sleep: #8892a3;
-        --band-alpha: 0.18;
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        color-scheme: light;
+        --bg: #F6F7FB;
+        --surface: #FFFFFF;
+        --surface-2: #EEF1F7;
+        --text: #121622;
+        --muted: #5C6577;
+        --line: rgba(10, 12, 17, 0.08);
+        --peak: #E8832A;
+        --mid: #22A86E;
+        --low: #3566E0;
+        --marker-blue: #3566E0;
+        --night: #4A3BCB;
+        --good: #22A86E;
+        --warn: #C98A0E;
+        --bad: #D9453F;
       }
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #F6F7FB;
+      --surface: #FFFFFF;
+      --surface-2: #EEF1F7;
+      --text: #121622;
+      --muted: #5C6577;
+      --line: rgba(10, 12, 17, 0.08);
+      --peak: #E8832A;
+      --mid: #22A86E;
+      --low: #3566E0;
+      --marker-blue: #3566E0;
+      --night: #4A3BCB;
+      --good: #22A86E;
+      --warn: #C98A0E;
+      --bad: #D9453F;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+      font-family: var(--body);
       font-size: 15px;
-      line-height: 1.5;
+      line-height: 1.55;
+      font-variant-numeric: tabular-nums;
       -webkit-text-size-adjust: 100%;
+      -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 960px; margin: 0 auto; padding-block: 28px 48px; padding-inline: 16px; }
-    h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
-    h2 { font-size: 1.05rem; margin: 0; letter-spacing: -0.005em; }
-    h3 { font-size: 1rem; margin: 0; }
-    .sub { margin: 0; color: var(--muted); font-size: 0.9rem; }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-      margin-top: 18px;
+    .wrap { max-width: 760px; margin: 0 auto; padding-block: 36px 56px; padding-inline: 20px; }
+    section { margin-top: 48px; }
+    .head { margin-bottom: 18px; }
+    .eyebrow {
+      margin: 0 0 4px; color: var(--muted);
+      font-size: 0.68rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.16em;
     }
-    .card-head { margin-bottom: 12px; }
-    .hint { margin: 4px 0 0; color: var(--muted); font-size: 0.82rem; }
-    .tiles {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 10px;
-      margin-top: 18px;
+    h1 { font-family: var(--display); font-size: 2.1rem; font-weight: 700; line-height: 1.15; margin: 2px 0 6px; letter-spacing: -0.02em; }
+    h2 { font-family: var(--display); font-size: 1.3rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+    h3 { font-family: var(--display); font-size: 1rem; font-weight: 600; margin: 0; }
+    .hint { margin: 8px 0 0; color: var(--muted); font-size: 0.84rem; max-width: 52ch; }
+    .top { margin-top: 0; }
+    .wordmark {
+      margin: 0; color: var(--muted);
+      font-family: var(--display); font-size: 0.72rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.2em;
     }
-    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
-    .tile-label { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-    .tile-value { font-size: 1.35rem; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
-    .tile-sub { font-size: 0.78rem; color: var(--muted); }
+    .summary { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+    /* ── timeline hero ─────────────────────────────────────────────── */
+    .hero { margin-top: 36px; }
+    .timeline { display: block; width: 100%; height: auto; margin-top: 4px; }
+    .timeline text { font-family: var(--body); }
+    .tl-grid { stroke: var(--line); stroke-width: 1; }
+    .tl-guide { stroke: var(--line); stroke-width: 1.5; }
+    .tl-col {
+      fill: var(--muted); font-family: var(--display); font-size: 14px;
+      font-weight: 600; letter-spacing: 1.6px;
+    }
+    .stop-low { stop-color: var(--low); }
+    .stop-mid { stop-color: var(--mid); }
+    .stop-peak { stop-color: var(--peak); }
+    .tl-curve {
+      fill: none; stroke: url(#energyGradient); stroke-width: 6;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .tl-sun, .tl-moon, .tl-marker { stroke: var(--bg); stroke-width: 3; }
+    .tl-sun { fill: var(--marker-blue); }
+    .tl-moon { fill: var(--night); }
+    .tl-marker.tl-peak { fill: var(--peak); }
+    .tl-marker.tl-blue { fill: var(--marker-blue); }
+    .ic-stroke { fill: none; stroke: var(--on-marker); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .ic-fill { fill: var(--on-marker); }
+    .tl-connector { fill: none; stroke: var(--line); stroke-width: 1.5; }
+    .tl-time { fill: var(--muted); font-size: 17px; }
+    .tl-title { fill: var(--text); font-family: var(--display); font-size: 24px; font-weight: 600; }
+    .tl-advice { fill: var(--muted); font-size: 16px; }
+    .tl-edge { fill: var(--muted); font-size: 13px; letter-spacing: 0.02em; }
+    .now-rule { stroke: var(--text); stroke-width: 1.2; stroke-dasharray: 4 5; opacity: 0.55; }
+    .now-chip { fill: var(--surface-2); }
+    .now-text { fill: var(--text); font-size: 13px; font-weight: 600; letter-spacing: 1.1px; }
+
+    /* ── tiles ─────────────────────────────────────────────────────── */
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .tile { background: var(--surface); border-radius: 16px; padding: 16px 16px 14px; }
+    .tile-label {
+      margin: 0; color: var(--muted); font-size: 0.66rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.13em;
+    }
+    .tile-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 46px; }
+    .tile-value {
+      margin: 4px 0 0; font-family: var(--display); font-size: 1.7rem; font-weight: 600;
+      letter-spacing: -0.02em; line-height: 1.1;
+    }
+    .tile-value .unit { font-size: 0.9rem; font-weight: 500; color: var(--muted); margin-left: 3px; }
+    .tile-sub { margin: 2px 0 0; color: var(--muted); font-size: 0.76rem; }
     .tone-good .tile-value { color: var(--good); }
-    .tone-mid .tile-value { color: var(--mid); }
-    .tone-low .tile-value { color: var(--low); }
-    .chart-wrap { position: relative; }
-    .chart { display: block; width: 100%; height: auto; overflow: visible; }
-    .grid { stroke: var(--border); stroke-width: 1; }
-    .axis-line { stroke: var(--border); stroke-width: 1; }
-    .tick { stroke: var(--border); stroke-width: 1; }
-    .axis { fill: var(--muted); font-size: 11px; font-family: inherit; }
-    .band-label { fill: var(--muted); font-size: 10.5px; font-family: inherit; letter-spacing: 0.02em; }
-    .marker-label { fill: var(--muted); font-size: 11px; font-family: inherit; }
-    .marker-label.now { fill: var(--accent); font-weight: 600; }
-    .curve-line { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-    .curve-area { fill: var(--accent-soft); stroke: none; }
-    .nowline { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 5 4; }
-    .bedline { stroke: var(--z-melatonin_window); stroke-width: 1.4; stroke-dasharray: 2 3; }
-    .melatonin { fill: var(--z-melatonin_window); opacity: 0.1; stroke: var(--z-melatonin_window); stroke-dasharray: 3 3; stroke-opacity: 0.5; }
-    .band { opacity: var(--band-alpha); }
-    .band-grogginess { fill: var(--z-grogginess); }
-    .band-morning_peak { fill: var(--z-morning_peak); }
-    .band-afternoon_dip { fill: var(--z-afternoon_dip); }
-    .band-evening_peak { fill: var(--z-evening_peak); }
-    .band-wind_down { fill: var(--z-wind_down); }
-    .band-melatonin_window { fill: var(--z-melatonin_window); }
-    .band-sleep { fill: var(--z-sleep); }
-    .tip {
-      position: absolute; top: 0; transform: translateX(-50%);
-      background: var(--text); color: var(--surface);
-      font-size: 0.76rem; padding: 3px 8px; border-radius: 6px;
-      pointer-events: none; white-space: nowrap;
+    .tone-mid .tile-value { color: var(--warn); }
+    .tone-low .tile-value { color: var(--bad); }
+    .ring { width: 42px; height: 42px; flex: none; }
+    .ring-track { fill: none; stroke: var(--surface-2); stroke-width: 4; }
+    .ring-arc { fill: none; stroke-width: 4; stroke-linecap: round; stroke: var(--muted); }
+    .ring-arc.tone-good { stroke: var(--good); }
+    .ring-arc.tone-mid { stroke: var(--warn); }
+    .ring-arc.tone-low { stroke: var(--bad); }
+
+    /* ── plan ──────────────────────────────────────────────────────── */
+    .plan { list-style: none; margin: 0; padding: 0; }
+    .plan-row {
+      display: grid; grid-template-columns: 124px 108px 1fr; gap: 14px;
+      align-items: baseline; padding: 12px 0; border-top: 1px solid var(--line);
     }
-    .zones { list-style: none; margin: 0; padding: 0; }
-    .zone { display: grid; grid-template-columns: 108px 150px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); align-items: baseline; }
-    .zone:first-child { border-top: none; }
-    .zone-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.86rem; }
-    .zone-name { font-weight: 600; }
-    .zone-advice { color: var(--muted); }
-    .zone-grogginess .zone-name { color: var(--z-grogginess); }
-    .zone-morning_peak .zone-name { color: var(--z-morning_peak); }
-    .zone-afternoon_dip .zone-name { color: var(--z-afternoon_dip); }
-    .zone-evening_peak .zone-name { color: var(--z-evening_peak); }
-    .zone-wind_down .zone-name { color: var(--z-wind_down); }
-    .zone-melatonin_window .zone-name { color: var(--z-melatonin_window); }
-    .zone-sleep .zone-name { color: var(--z-sleep); }
-    .timeline { list-style: none; margin: 0; padding: 0; }
-    .step { display: grid; grid-template-columns: 108px 1fr; gap: 10px; padding: 10px 0 10px 0; border-left: 2px solid var(--border); padding-left: 14px; margin-left: 4px; position: relative; }
-    .step::before { content: ""; position: absolute; left: -6px; top: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
-    .step-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.86rem; }
-    .step-name { font-weight: 600; display: block; }
-    .step-reason { color: var(--muted); }
-    .bar { fill: var(--accent); }
-    .bar-short { fill: var(--shortfall); }
-    .need-mark { stroke: var(--text); stroke-width: 2; opacity: 0.72; }
-    .bar-delta { fill: var(--muted); font-size: 10.5px; font-family: inherit; font-variant-numeric: tabular-nums; }
-    .bar-delta.short { fill: var(--shortfall); }
-    .data-table { margin-top: 10px; font-size: 0.86rem; }
+    .plan-row:first-child { border-top: none; }
+    .plan-time { color: var(--muted); font-size: 0.9rem; }
+    .plan-reason { color: var(--muted); }
+    .pill {
+      display: inline-block; justify-self: start; border-radius: 999px;
+      padding: 2px 10px; font-size: 0.72rem; font-weight: 600;
+      letter-spacing: 0.04em; white-space: nowrap;
+    }
+    .act { color: var(--bg); }
+    .act-deep_work { background: var(--peak); }
+    .act-workout { background: var(--mid); }
+    .act-admin { background: var(--muted); }
+    .act-nap { background: var(--night); color: #fff; }
+    .act-wind_down { background: var(--low); color: #fff; }
+    .act-bed { background: var(--night); color: #fff; }
+
+    /* ── tonight ───────────────────────────────────────────────────── */
+    .tonight { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .tonight-half {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--surface); border-radius: 16px; padding: 16px 18px;
+    }
+    .glyph { width: 26px; height: 26px; flex: none; }
+    .tonight .glyph .ic-fill { fill: var(--low); }
+    .tonight .glyph .ic-stroke { stroke: var(--low); }
+    .tonight-half:first-child .glyph .ic-fill { fill: var(--night); }
+    .tonight-label {
+      margin: 0; color: var(--muted); font-size: 0.66rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.13em;
+    }
+    .tonight-value { margin: 0; font-family: var(--display); font-size: 1.6rem; font-weight: 600; letter-spacing: -0.02em; }
+    .tonight-note { margin: 12px 0 0; color: var(--muted); }
+
+    /* ── charts ────────────────────────────────────────────────────── */
+    .bars { display: block; width: 100%; height: auto; }
+    .bars text, .mini text { font-family: var(--body); }
+    .grid { stroke: var(--line); stroke-width: 1; }
+    .axis-line { stroke: var(--line); stroke-width: 1; }
+    .axis { fill: var(--muted); font-size: 12px; }
+    .bar { fill: var(--mid); }
+    .bar-short { fill: var(--low); }
+    .shortfall { fill: var(--bad); opacity: 0.26; }
+    .need-mark { stroke: var(--text); stroke-width: 2; opacity: 0.6; }
+    .data-table { margin-top: 14px; font-size: 0.86rem; }
     .data-table summary { cursor: pointer; color: var(--muted); }
-    .data-table table { border-collapse: collapse; margin-top: 8px; width: 100%; }
-    .data-table th, .data-table td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+    .data-table table { border-collapse: collapse; margin-top: 10px; width: 100%; }
+    .data-table th, .data-table td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); }
     .data-table th[scope="row"] { text-align: left; font-weight: 500; }
     .data-table thead th { color: var(--muted); font-weight: 500; }
-    td.neg { color: var(--shortfall); }
-    .minis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
-    .mini { margin: 0; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+    td.neg { color: var(--bad); }
+    .minis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+    .mini { margin: 0; background: var(--surface); border-radius: 16px; padding: 12px 14px; }
+    .mini svg { display: block; width: 100%; height: auto; }
     .mini figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-    .mini-title { font-weight: 600; font-size: 0.9rem; }
-    .mini-last { color: var(--muted); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
-    .mini-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .mini-dot { fill: var(--accent); }
-    .mini-range { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.74rem; }
-    .summary { margin: 0; }
-    .summary-row { display: grid; grid-template-columns: 120px 1fr; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
-    .summary-row:first-child { border-top: none; }
-    .summary dt { color: var(--muted); font-size: 0.86rem; }
-    .summary dd { margin: 0; }
-    .corrs, .recs { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-    .corr-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .corr-pair { font-weight: 600; }
+    .mini-title { font-family: var(--display); font-weight: 600; font-size: 0.9rem; }
+    .mini-last { color: var(--muted); font-size: 0.82rem; }
+    .mini-line { fill: none; stroke: var(--mid); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .mini-dot { fill: var(--mid); }
+    .mini-range { display: flex; justify-content: space-between; margin: 0; color: var(--muted); font-size: 0.74rem; }
+
+    /* ── insights ──────────────────────────────────────────────────── */
+    .dl { margin: 0; }
+    .dl-row { display: grid; grid-template-columns: 128px 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .dl-row:first-child { border-top: none; }
+    .dl dt { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; padding-top: 2px; }
+    .dl dd { margin: 0; }
+    .corrs, .recs { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+    .corr-pair { margin: 0; font-family: var(--display); font-weight: 600; }
     .corr-vs { color: var(--muted); font-weight: 400; }
-    .corr-r { color: var(--muted); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
-    .corr-bar { height: 6px; background: var(--surface-2); border-radius: 3px; margin: 6px 0; overflow: hidden; }
-    .corr-fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-    .corr-fill.neg { background: var(--shortfall); }
-    .corr-reading { margin: 0; color: var(--muted); font-size: 0.9rem; }
-    .rec { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; border-left: 3px solid var(--border); }
-    .rec.impact-high { border-left-color: var(--accent); }
-    .rec.impact-medium { border-left-color: var(--z-morning_peak); }
-    .rec.impact-low { border-left-color: var(--border); }
+    .corr-r { color: var(--muted); font-weight: 400; font-size: 0.8rem; margin-left: 6px; white-space: nowrap; }
+    .corr-reading { margin: 2px 0 0; color: var(--muted); }
+    .rec { background: var(--surface); border-radius: 16px; padding: 16px 18px; }
     .rec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .rec-rank { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--surface); display: inline-grid; place-items: center; font-size: 0.78rem; font-weight: 700; flex: none; }
-    .pill { margin-left: auto; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
-    .rec-why { margin: 6px 0 0; color: var(--muted); }
-    .rec-action { margin: 6px 0 0; font-weight: 500; }
-    footer { margin-top: 22px; color: var(--muted); font-size: 0.78rem; }
-    @media (max-width: 560px) {
-      .zone { grid-template-columns: 1fr; gap: 2px; }
-      .step { grid-template-columns: 1fr; gap: 2px; }
-      .summary-row { grid-template-columns: 1fr; gap: 0; }
-      .tile-value { font-size: 1.2rem; }
-      /* The two wide charts use a 960-unit viewBox. Squeezed into a phone they
-         scale their text down to ~4px, so give them a readable floor and let
-         the card scroll sideways instead. Mini sparklines have no SVG text and
-         are deliberately left out (they are not inside a .chart-wrap). */
-      .chart-wrap { overflow-x: auto; overscroll-behavior-x: contain; }
-      .chart-wrap > .chart { min-width: 620px; }
-      .axis { font-size: 15px; }
-      .band-label { font-size: 14px; }
-      .marker-label { font-size: 15px; }
-      .bar-delta { font-size: 14px; }
-      /* …and say so, so a clipped chart does not read as missing data. */
-      .chart-hint::after { content: ' Drag the chart sideways to see all of it.'; }
+    .rec-rank {
+      width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2);
+      color: var(--text); display: inline-grid; place-items: center;
+      font-family: var(--display); font-size: 0.78rem; font-weight: 700; flex: none;
+    }
+    .rec-head h3 { flex: 1 1 auto; }
+    .impact {
+      color: var(--muted); background: none; border: 1px solid var(--line);
+      text-transform: uppercase; font-size: 0.64rem; letter-spacing: 0.1em;
+    }
+    .impact-high { color: var(--peak); }
+    .impact-medium { color: var(--mid); }
+    .rec-why { margin: 8px 0 0; color: var(--muted); }
+    .rec-action { margin: 6px 0 0; font-weight: 600; }
+    footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.78rem; }
+
+    @media (max-width: 620px) {
+      .wrap { padding-block: 26px 40px; }
+      h1 { font-size: 1.7rem; }
+      .tiles { grid-template-columns: 1fr 1fr; }
+      .plan-row { grid-template-columns: 1fr; gap: 4px; }
+      .dl-row { grid-template-columns: 1fr; gap: 2px; }
+      .tonight { grid-template-columns: 1fr; }
+      /* The bars viewBox is 720 wide; at phone width its 12px text lands near
+         6px, so scale the type up and thin out the date labels instead of
+         putting the chart in a sideways scroller. */
+      .axis { font-size: 17px; }
+      .bar-date-alt { display: none; }
     }`;
 
-const SCRIPT = `      (function () {
-        var svg = document.getElementById('energy-svg');
-        var tip = document.getElementById('energy-tip');
-        if (!svg || !tip || !window.ENERGY_POINTS) return;
-        var pts = window.ENERGY_POINTS;
-        var X0 = ${CURVE_PLOT.x0};
-        var X1 = ${CURVE_PLOT.x1};
-        function show(evt) {
-          var box = svg.getBoundingClientRect();
-          if (!box.width) return;
-          var vx = ((evt.clientX - box.left) / box.width) * ${CURVE_VIEWBOX.width};
-          var i = Math.round(((vx - X0) / (X1 - X0)) * (pts.length - 1));
-          if (i < 0) i = 0;
-          if (i > pts.length - 1) i = pts.length - 1;
-          tip.textContent = pts[i][0] + '  energy ' + pts[i][1];
-          tip.hidden = false;
-          var left = evt.clientX - box.left;
-          tip.style.left = Math.max(28, Math.min(box.width - 28, left)) + 'px';
-        }
-        svg.addEventListener('pointermove', show);
-        svg.addEventListener('pointerleave', function () { tip.hidden = true; });
-      })();`;
+/* ── Document ─────────────────────────────────────────────────────────────── */
 
 /**
- * Render the complete, self-contained HTML report.
+ * Render the complete HTML report.
  *
  * @param {object} input
  * @param {object} input.energyDay - an `EnergyDay` (PLAN.md section 4)
@@ -851,32 +1162,20 @@ export function renderHtmlReport({
   if (!energyDay || typeof energyDay !== 'object') {
     throw new TypeError('renderHtmlReport: energyDay object is required');
   }
-  const date = String(energyDay.date ?? '');
-  const title = `Whoop Energy — ${date}`;
-  const curve = Array.isArray(energyDay.curve) ? energyDay.curve : [];
-  const wakeMin = num(energyDay.wakeMin);
-  const points = curve.map((p, i) => [clock(wakeMin + i * 15), Math.round(num(p && p.energy))]);
+  const title = `Whoop Energy — ${String(energyDay.date ?? '')}`;
 
   const sections = [
-    renderTiles(energyDay),
-    renderCurve(energyDay),
-    renderZones(energyDay),
+    renderHeader(energyDay),
+    renderTimeline(energyDay),
+    renderTiles(energyDay, insights),
     renderPlan(energyDay),
-    renderInsightsSummary(insights),
+    renderTonight(energyDay),
     renderDebtBars(insights),
     renderNightTrends(nights),
+    renderInsightsSummary(insights),
     renderCorrelations(insights),
     renderRecommendations(insights),
   ].filter(Boolean);
-
-  const headline = [
-    Number.isFinite(energyDay.now) && energyDay.now !== null ? `now ${clock(energyDay.now)}` : null,
-    `wake ${clock(energyDay.wakeMin)}`,
-    `target bed ${clock(energyDay.targetBedtimeMin)}`,
-    `target wake ${clock(energyDay.targetWakeMin)}`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   return `<!doctype html>
 <html lang="en">
@@ -884,26 +1183,23 @@ export function renderHtmlReport({
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&amp;family=Sora:wght@500;600;700&amp;display=swap">
 <style>
 ${STYLES}
 </style>
 </head>
 <body>
   <main class="wrap">
-    <header>
-      <h1>${escapeHtml(title)}</h1>
-      <p class="sub">${escapeHtml(headline)}</p>
-    </header>
 ${sections.join('\n')}
-    <footer>Generated ${escapeHtml(generatedAt)} · circadian model from your own WHOOP sleep and recovery records.</footer>
+    <footer>Generated ${escapeHtml(
+      generatedAt,
+    )} · circadian model from your own WHOOP sleep and recovery records. Heuristic model, not medical advice.</footer>
   </main>
-  <script>
-      window.ENERGY_POINTS = ${JSON.stringify(points)};
-${SCRIPT}
-  </script>
 </body>
 </html>
 `;
 }
 
-export default { renderHtmlReport, escapeHtml };
+export default { renderHtmlReport, escapeHtml, wrapText };
