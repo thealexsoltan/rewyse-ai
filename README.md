@@ -130,6 +130,19 @@ Every phase pauses for your approval. You can go back, revise, or skip ahead. If
 | `/product-expand` | Suggest complementary products |
 | `/rewyse-help` | Ask questions, troubleshoot, check status |
 | `/rewyse-onboard` | First-time setup walkthrough |
+| `/whoop-energy` | *(Standalone)* Circadian energy schedule from your WHOOP data |
+
+---
+
+## Whoop Energy
+
+A standalone tool that ships alongside the pipeline. Point it at your WHOOP band and it
+turns your sleep, recovery and strain data into a Rise-style circadian energy schedule —
+when you will be sharp, when you will dip, when to train, and what time to go to bed
+tonight — plus a 14-day sleep-debt report and a self-contained HTML export.
+
+Node 18+, zero dependencies, and `--demo` mode runs the whole thing without an account.
+See **[whoop-energy/README.md](whoop-energy/README.md)**, or just run `/whoop-energy`.
 
 ---
 

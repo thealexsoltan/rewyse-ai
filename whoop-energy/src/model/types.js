@@ -160,6 +160,8 @@
  * @property {number} windowDays
  * @property {number} nights
  * @property {{ hours: number, level: string, trend7d: string, byDay: Array<{date: string, needMin: number, asleepMin: number, deltaMin: number, cumulativeDebtHours: number}> }} debt
+ *   `byDay[].deltaMin` is `needMin - asleepMin`, so a **positive** value is a
+ *   shortfall. Renderers flip the sign before printing.
  * @property {{ bedtimeSdMin: number|null, wakeSdMin: number|null, whoopConsistencyAvg: number|null }} consistency
  * @property {{ efficiencyAvg: number|null, disturbancesAvg: number|null, swsPctAvg: number|null, remPctAvg: number|null, performanceAvg: number|null }} quality
  * @property {{ avg: number|null, avg7d: number|null, hrvAvg: number|null, hrvAvg7d: number|null, hrvDeltaPct: number|null, rhrAvg: number|null, rhrAvg7d: number|null, calibrating: boolean }} recovery

@@ -157,10 +157,15 @@ create_skill "rewyse-onboard" \
   "" \
   "Read and follow the full instructions in \`rewyse-ai/rewyse-onboard/SKILL.md\`.\n\nAlso read \`rewyse-ai/rewyse-onboard/reference.md\` for setup guides and troubleshooting."
 
+create_skill "whoop-energy" \
+  "Circadian energy schedule from WHOOP sleep data — sleep debt, energy zones, when to do deep work or train, and a day plan." \
+  "argument-hint: [today|insights|report|auth|sync]" \
+  "Read and follow the full instructions in \`rewyse-ai/whoop-energy/SKILL.md\`.\n\nAlso read \`rewyse-ai/whoop-energy/README.md\` for the model, every tunable constant, and troubleshooting."
+
 if [ "$SKILL_COUNT" -gt 0 ]; then
   echo -e "${GREEN}[ok]${NC} Registered $SKILL_COUNT new slash commands in .claude/skills/"
 else
-  echo -e "${GREEN}[ok]${NC} All 17 slash commands already registered in .claude/skills/"
+  echo -e "${GREEN}[ok]${NC} All 18 slash commands already registered in .claude/skills/"
 fi
 
 # Add Rewyse AI registration to root CLAUDE.md if not already present
@@ -185,7 +190,7 @@ See `rewyse-ai/CLAUDE.md` for full pipeline documentation.
 **All commands:** `/build-product`, `/product-idea`, `/build-database`, `/expert-profile`,
 `/content-blueprint`, `/write-prompt`, `/test-content`, `/generate-content`,
 `/generate-images`, `/design-product`, `/product-qa`, `/product-expand`, `/home-page`,
-`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`
+`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`, `/whoop-energy`
 REGISTRATION
     echo -e "${GREEN}[ok]${NC} Added Rewyse AI registration to CLAUDE.md"
   fi
@@ -205,7 +210,7 @@ See `rewyse-ai/CLAUDE.md` for full pipeline documentation.
 **All commands:** `/build-product`, `/product-idea`, `/build-database`, `/expert-profile`,
 `/content-blueprint`, `/write-prompt`, `/test-content`, `/generate-content`,
 `/generate-images`, `/design-product`, `/product-qa`, `/product-expand`, `/home-page`,
-`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`
+`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`, `/whoop-energy`
 NEWCLAUDE
   echo -e "${GREEN}[ok]${NC} Created CLAUDE.md with Rewyse AI registration"
 fi

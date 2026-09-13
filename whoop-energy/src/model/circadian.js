@@ -48,7 +48,7 @@ export const DEBT_S_GAIN = 0.15;
 /** Amplitude of the 12-hour harmonic of process C. */
 export const C_HARMONIC_AMPLITUDE = 0.5;
 /** Phase of the 12-hour harmonic of process C, in radians. */
-export const C_HARMONIC_PHASE = (-3 * Math.PI) / 4;
+export const C_HARMONIC_PHASE = (-5 * Math.PI) / 8;
 
 /** Core body temperature minimum, relative to habitual wake (minutes). */
 export const CBT_OFFSET_MIN = -120;
@@ -353,10 +353,17 @@ export function buildEnergyDay({ nights = [], needMin, nowMin = null, tzOffsetMi
   const payback = clamp(debt.hours * PAYBACK_PER_DEBT_HOUR_MIN, 0, MAX_PAYBACK_MIN);
   const habitualBedAbs = wakeMin + mod1440(anchors.habitualBedtimeMin - wakeMin);
   const dlmoAbs = wakeMin + mod1440(anchors.dlmo - wakeMin);
-  // Never advance bedtime past DLMO + 90 min — but never *delay* it either, so
-  // the floor cannot push a habitually early sleeper later (PLAN §5 guard).
-  const floorAbs = Math.min(habitualBedAbs, dlmoAbs + MIN_BEDTIME_AFTER_DLMO_MIN);
-  const targetBedAbs = roundTo(Math.max(habitualBedAbs - payback, floorAbs), ROUND_TO_MIN);
+  // Never advance bedtime past DLMO + 90 min (PLAN §5 guard) — but the DLMO
+  // estimate is derived from habitual *wake* alone, so for anyone whose sleep
+  // opportunity is longer than ~7.5 h it lands at or after their habitual
+  // bedtime. Taking it as the floor there would silently cancel the whole debt
+  // payback (the tool would print "severe debt, go to bed earlier" next to a
+  // target bedtime identical to the habitual one). When that happens the
+  // sleeper's own schedule is the better evidence of their phase, so the floor
+  // falls back to the largest advance the payback cap allows.
+  const dlmoFloorAbs = dlmoAbs + MIN_BEDTIME_AFTER_DLMO_MIN;
+  const floorAbs = dlmoFloorAbs < habitualBedAbs ? dlmoFloorAbs : habitualBedAbs - MAX_PAYBACK_MIN;
+  const targetBedAbs = roundTo(clamp(habitualBedAbs - payback, floorAbs, habitualBedAbs), ROUND_TO_MIN);
   let sleepSpan = mod1440(roundTo(anchors.habitualWakeMin, ROUND_TO_MIN) - targetBedAbs);
   if (sleepSpan < MIN_SLEEP_SPAN_MIN) sleepSpan += MINUTES_PER_DAY;
   const targetWakeAbs = targetBedAbs + sleepSpan;

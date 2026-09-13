@@ -299,7 +299,7 @@ function renderCurve(energyDay) {
   }
 
   return `    <section class="card" aria-label="Energy curve">
-      <div class="card-head"><h2>Energy through the day</h2><p class="hint">From wake at ${escapeHtml(
+      <div class="card-head"><h2>Energy through the day</h2><p class="hint chart-hint">From wake at ${escapeHtml(
         clock(wakeMin),
       )} to wake tomorrow. 0-100 is relative to your own waking range.</p></div>
       <div class="chart-wrap">
@@ -389,11 +389,14 @@ function renderDebtBars(insights) {
       const bx = cx - barW / 2;
       const top = yOf(day.asleepMin);
       const needY = yOf(day.needMin);
-      const short = num(day.deltaMin) < 0;
+      // `deltaMin` is need − asleep (positive = shortfall); displayed flipped
+      // so a reader sees −0h39 for a night that came up short.
+      const short = num(day.deltaMin) > 0;
+      const shownDelta = -num(day.deltaMin);
       return `        <g class="bar-group">
           <title>${escapeHtml(shortDate(day.date))}: ${escapeHtml(fmtDur(day.asleepMin))} asleep of ${escapeHtml(
             fmtDur(day.needMin),
-          )} needed (${escapeHtml(fmtSignedDur(day.deltaMin))})</title>
+          )} needed (${escapeHtml(fmtSignedDur(shownDelta))})</title>
           <rect class="bar${short ? ' bar-short' : ''}" x="${round(bx, 1)}" y="${round(top, 1)}" width="${round(
             barW,
             1,
@@ -405,7 +408,7 @@ function renderDebtBars(insights) {
           <text class="bar-delta${short ? ' short' : ''}" x="${round(cx, 1)}" y="${round(
             Math.min(top, needY) - 7,
             1,
-          )}" text-anchor="middle">${escapeHtml(fmtSignedDur(day.deltaMin))}</text>
+          )}" text-anchor="middle">${escapeHtml(fmtSignedDur(shownDelta))}</text>
           <text class="axis" x="${round(cx, 1)}" y="${y1 + 18}" text-anchor="middle">${escapeHtml(
             shortDate(day.date),
           )}</text>
@@ -419,18 +422,20 @@ function renderDebtBars(insights) {
         `          <tr><th scope="row">${escapeHtml(shortDate(day.date))}</th><td>${escapeHtml(
           fmtDur(day.asleepMin),
         )}</td><td>${escapeHtml(fmtDur(day.needMin))}</td><td class="${
-          num(day.deltaMin) < 0 ? 'neg' : 'pos'
-        }">${escapeHtml(fmtSignedDur(day.deltaMin))}</td></tr>`,
+          num(day.deltaMin) > 0 ? 'neg' : 'pos'
+        }">${escapeHtml(fmtSignedDur(-num(day.deltaMin)))}</td></tr>`,
     )
     .join('\n');
 
   return `    <section class="card" aria-label="Sleep versus need">
-      <div class="card-head"><h2>Sleep vs need</h2><p class="hint">Bars are time asleep; the thin marker is that night's need. Shortfalls are highlighted.</p></div>
+      <div class="card-head"><h2>Sleep vs need</h2><p class="hint chart-hint">Bars are time asleep; the thin marker is that night's need. Shortfalls are highlighted.</p></div>
+      <div class="chart-wrap">
       <svg class="chart" viewBox="0 0 ${BARS_VIEWBOX.width} ${BARS_VIEWBOX.height}" width="100%" role="img" aria-label="Time asleep against sleep need for each of the last nights">
 ${grid.join('\n')}
         <line class="axis-line" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" />
 ${bars}
       </svg>
+      </div>
       <details class="data-table">
         <summary>Show the numbers</summary>
         <table>
@@ -790,6 +795,18 @@ const STYLES = `    :root {
       .step { grid-template-columns: 1fr; gap: 2px; }
       .summary-row { grid-template-columns: 1fr; gap: 0; }
       .tile-value { font-size: 1.2rem; }
+      /* The two wide charts use a 960-unit viewBox. Squeezed into a phone they
+         scale their text down to ~4px, so give them a readable floor and let
+         the card scroll sideways instead. Mini sparklines have no SVG text and
+         are deliberately left out (they are not inside a .chart-wrap). */
+      .chart-wrap { overflow-x: auto; overscroll-behavior-x: contain; }
+      .chart-wrap > .chart { min-width: 620px; }
+      .axis { font-size: 15px; }
+      .band-label { font-size: 14px; }
+      .marker-label { font-size: 15px; }
+      .bar-delta { font-size: 14px; }
+      /* …and say so, so a clipped chart does not read as missing data. */
+      .chart-hint::after { content: ' Drag the chart sideways to see all of it.'; }
     }`;
 
 const SCRIPT = `      (function () {

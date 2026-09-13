@@ -428,7 +428,9 @@ export function renderInsightsTerminal(insights, opts = {}) {
     const barWidth = Math.max(8, Math.min(20, w - 42));
     for (const day of byDay) {
       const bar = debtBar(day.asleepMin, day.needMin, scaleMax, barWidth);
-      const delta = num(day.deltaMin);
+      // `deltaMin` is need − asleep (positive = shortfall); the reader wants a
+      // surplus/deficit reading, so flip the sign for display.
+      const delta = -num(day.deltaMin);
       const styleName = delta < 0 ? 'yellow' : 'green';
       out.push(
         `  ${paint(shortDate(day.date), 'dim', color)}  ${paint(bar, styleName, color)}  ` +

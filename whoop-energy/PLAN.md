@@ -36,7 +36,9 @@ whoop-energy/
   PLAN.md                 this file
   README.md               install, WHOOP developer app setup, usage, model explanation
   SKILL.md                slash-command instructions (same style as sibling skills)
-  package.json            {"type":"module", "bin": {"whoop-energy":"bin/whoop-energy.js"}, "scripts": {"test":"node --test test/"}}
+  package.json            {"type":"module", "bin": {"whoop-energy":"bin/whoop-energy.js"}, "scripts": {"test":"node --test test/*.test.js"}}
+                          (the *.test.js glob, not the directory form: `node --test test/` also
+                          picks up test/helpers/* on Node 22 and fails)
   .env.example            WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET, WHOOP_REDIRECT_URI, WHOOP_ENERGY_HOME
   bin/whoop-energy.js     CLI entry (arg parsing with node:util parseArgs, dispatch)
   src/
@@ -59,8 +61,10 @@ whoop-energy/
     client.test.js (pagination/refresh against a stubbed fetch), cli.test.js (--demo smoke, all formats)
 ```
 
-Also touched at repo root: `.gitignore` (add `whoop-energy/.env`, `whoop-energy/data/`),
-`install.sh` (one `create_skill "whoop-energy" ...` line), `CLAUDE.md` (skill entry).
+Also touched at repo root: `.gitignore` (`whoop-energy/.env`, `whoop-energy/data/`,
+`whoop-energy/*.html`), `install.sh` (a `create_skill "whoop-energy" ...` block, the
+slash-command count and both CLAUDE.md registration blocks), `CLAUDE.md` (a "Standalone
+Tools" heading plus a Skills entry) and `README.md` (a "Whoop Energy" section).
 
 ---
 
@@ -131,6 +135,8 @@ EnergyDay = {
 Insights = {
   windowDays, nights: number,
   debt: { hours, level, trend7d, byDay: [{date, needMin, asleepMin, deltaMin, cumulativeDebtHours}] },
+  // deltaMin is `needMin - asleepMin`: POSITIVE means the night came up short.
+  // Renderers flip the sign so the reader sees "-1h28" for a shortfall.
   consistency: { bedtimeSdMin, wakeSdMin, whoopConsistencyAvg },
   quality: { efficiencyAvg, disturbancesAvg, swsPctAvg, remPctAvg, performanceAvg },
   recovery: { avg, avg7d, hrvAvg, hrvAvg7d, hrvDeltaPct, rhrAvg, rhrAvg7d, calibrating },
@@ -155,8 +161,12 @@ Trend = debt over last 7 nights vs debt over the 7 before.
 `habitualWake`, `habitualBedtime`, `midsleep`. `cbtMin = habitualWake − 120 min`
 (core body temperature minimum). `dlmo = cbtMin − 7h` (dim-light melatonin onset).
 
-**Process C** (circadian): `C(t) = cos(θ) + 0.25·cos(2θ + π/2)` with `θ = 2π·(t − (cbtMin + 12h))/24h`,
+**Process C** (circadian): `C(t) = cos(θ) + A·cos(2θ + φ)` with `θ = 2π·(t − (cbtMin + 12h))/24h`,
 giving a broad late-afternoon/evening peak and a post-lunch dip.
+**Shipped values: `A = 0.5` (`C_HARMONIC_AMPLITUDE`), `φ = −5π/8` (`C_HARMONIC_PHASE`), in
+`src/model/circadian.js`.** This plan originally specified `A = 0.25, φ = +π/2`; that
+combination carves no visible afternoon dip at all (two agents found this independently),
+so the constants were retuned. Both are named exports — retune them there, not here.
 
 **Process S** (homeostatic pressure): simulate the actual last 14 days of sleep/wake from records.
 Awake: `S ← S + (1 − S)(1 − e^(−dt/18.2h))`. Asleep: `S ← S·e^(−dt/4.2h)`. Start S = 0.5 at the window
@@ -169,17 +179,32 @@ start; the long simulation makes the initial value irrelevant. Project today fro
 0–100 over the waking span (sleep span is rendered but not used for normalisation).
 
 **Target bedtime**: `habitualBedtime − payback`, where `payback = clamp(debtHours × 15 min, 0, 45 min)`.
-Never earlier than `dlmo + 90 min`. **Target wake** = `habitualWake` (anchor wake time; that's the
-Rise/CBT-I advice). Both rounded to 5 min.
+Never earlier than `dlmo + 90 min` — **but that floor only applies when `dlmo + 90 min` is
+genuinely earlier than the habitual bedtime.** DLMO here is derived from habitual *wake*
+alone (`wake − 9h`), so for any sleeper with a sleep opportunity longer than ~7.5 h it
+lands at or after their actual bedtime; taken literally it cancels the entire payback and
+the tool prints "severe debt" beside an unchanged target bedtime. When that happens the
+sleeper's own schedule is the better evidence of their phase and the floor falls back to
+`habitualBedtime − MAX_PAYBACK_MIN`. **Target wake** = `habitualWake` (anchor wake time;
+that's the Rise/CBT-I advice). Both rounded to 5 min.
 
 **Zones** (segment the curve; clock fallbacks in brackets if the curve is flat):
 - grogginess: wake → first t where energy ≥ 40 and inertia < 0.05 [wake + 90 min]
 - morning_peak: from end of grogginess → energy falls below 65 heading down [wake+2h → wake+5.5h]
-- afternoon_dip: contiguous region around the local minimum between wake+5h and wake+10h where energy < 55 [wake+6h → wake+8h]
+- afternoon_dip: contiguous region around the local minimum between wake+5h and wake+10h, found in
+  three tiers because a normalised curve often never reaches 55: (1) energy < 55 where the curve
+  crosses it; (2) otherwise, within `DIP_RELATIVE_BAND` (5 points) of the local minimum, widened at
+  most `DIP_WIDEN_MARGIN_MIN` (60 min) beyond the search window; (3) if that comes out wider than
+  `DIP_MAX_WIDTH_MIN` (300 min) the curve is flat there, so use the clock fallback [wake+6h → wake+8h]
 - evening_peak: from end of dip until energy falls below 55 [wake+9h → wake+13h]
 - wind_down: `targetBedtime − 2h` → `melatonin.start`
 - melatonin_window: `targetBedtime − 60min` → `targetBedtime + 30min`
 - sleep: `targetBedtime` → `targetWake`
+
+Zones are then forced into a **contiguous, monotone, gap-free chain**: each boundary is clamped so
+it is never before the previous one and never after the next, and every zone ends exactly where the
+next begins. (The melatonin window deliberately overlaps the start of `sleep` by 30 min; it is
+reported alongside the chain rather than inside it.)
 
 **Day plan** rules: deep_work = morning_peak and evening_peak (split evening if it spans dinner);
 workout = recovery ≥ 67 → inside a peak (prefer morning if HRV ≥ 7-day avg, else evening);
@@ -196,8 +221,11 @@ wind_down = wind_down zone; bed = targetBedtime.
 - disturbancesAvg high (≥ 12) → "Reduce disturbances"
 - consistency avg < 70 → "Regularise schedule"
 - correlation-driven: e.g. bedtime lateness ↔ recovery negative r → "Late nights cost you recovery"
-Correlations (Pearson, n ≥ 7, report only |r| ≥ 0.3): asleepMin ↔ next recovery.score;
-bedtimeMin (lateness) ↔ recovery.score; strain ↔ efficiencyPct of following night; napMin ↔ asleepMin.
+Correlations (Pearson, n ≥ 7, report only |r| ≥ 0.3): asleepMin ↔ recovery.score;
+bedtimeMin (lateness) ↔ recovery.score; strain ↔ efficiencyPct; napMin ↔ asleepMin.
+**All four are same-row joins**, not lagged: in the canonical `SleepNight`, `recovery` is already
+the score WHOOP computed *from* that sleep and `strain` is already the strain of the day that
+*preceded* it, so "next recovery" and "following night's efficiency" are the same row.
 
 ---
 
@@ -210,10 +238,18 @@ whoop-energy today [--format terminal|json|html] [--out FILE] [--now HH:MM] [--n
 whoop-energy insights [--days 14] [--format terminal|json]
 whoop-energy report [--out whoop-energy-report.html]   full HTML: today's curve + 14-day debt bars + insights + plan
 whoop-energy status                     auth state, token expiry, cache freshness, profile name
-Global: --demo (use fixtures, no auth/cache needed), --data-dir PATH, --tz +02:00 (override), --quiet
+Global: --demo (use fixtures, no auth/cache needed), --data-dir PATH, --tz +02:00 (override), --quiet,
+        --offline, -h/--help, -v/--version
+        `--tz` with a negative offset needs the `=` form (`--tz=-05:00`); `parseArgs` otherwise
+        reads the value as a flag.
 ```
 Exit codes: 0 ok, 2 usage, 3 not authenticated, 4 API error. All errors human-readable.
-`today` and `report` auto-`sync` if cache is older than 6 h (unless `--offline`).
+`today` and `report` auto-`sync` if cache is older than 6 h (unless `--offline`); `insights` never
+auto-syncs. `status` always exits 0 — it *reports* the auth state rather than failing on it.
+Under `--demo`, `auth` and `sync` are explicit no-ops ("nothing to authorize / nothing to sync")
+rather than errors. Demo data is 21 days of records built in memory by `src/demo/fixtures.js`
+(`makeDemoData({ tzOffset })`) in the same shape the WHOOP v2 endpoints return, so it flows through
+`normalizeNights` unchanged and nothing is written to disk.
 
 ---
 

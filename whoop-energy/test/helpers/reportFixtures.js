@@ -347,8 +347,10 @@ export function makeInsights({ date = '2025-09-13' } = {}) {
   const nights = makeNights(date);
   let cumulative = 0;
   const byDay = nights.map((n) => {
-    const deltaMin = n.asleepMin + n.napMin - n.needTotalMin;
-    cumulative = Math.max(0, cumulative - deltaMin / 60);
+    // Same sign convention as computeSleepDebt(): need − asleep, so a positive
+    // deltaMin is a shortfall.
+    const deltaMin = n.needTotalMin - (n.asleepMin + n.napMin);
+    cumulative = Math.max(0, cumulative + deltaMin / 60);
     return {
       date: n.date,
       needMin: n.needTotalMin,
