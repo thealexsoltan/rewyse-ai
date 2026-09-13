@@ -3,3 +3,8 @@ scripts/
 .DS_Store
 .env
 *.log
+
+# whoop-energy (standalone tool) — credentials, local cache, generated reports
+whoop-energy/.env
+whoop-energy/data/
+whoop-energy/*.html

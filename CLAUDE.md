@@ -31,6 +31,12 @@ to run the full pipeline.
 - **rewyse-help** — Q&A, troubleshooting, and project status for the pipeline
 - **rewyse-onboard** — First-time setup guide and readiness check
 
+## Standalone Tools
+
+- **whoop-energy** — A zero-dependency Node CLI in `whoop-energy/` that turns WHOOP
+  sleep data into a Rise-style circadian energy schedule. Not part of the 10-phase
+  pipeline; runs on its own. See `whoop-energy/README.md`.
+
 ## Skills
 
 ### build-product
@@ -151,6 +157,17 @@ list views, deletes old views, and hides database source titles.
 why something failed, and what to do next. Context-aware of active projects. Three modes:
 Ask (general Q&A), Diagnose (troubleshoot issues), Status (project dashboard).
 
+### whoop-energy
+**Slash command:** `/whoop-energy`
+**Triggers:** "my energy schedule", "when should I do deep work", "when should I train today",
+"what's my sleep debt", "WHOOP sleep insights", "plan my day around my sleep",
+"when should I go to bed", "circadian rhythm schedule"
+**Description:** Turns WHOOP sleep, recovery and strain data into a Rise-style circadian
+energy schedule — grogginess, morning peak, afternoon dip, evening peak, wind-down and
+melatonin window — plus sleep debt, a day plan (deep work / workout / admin / nap / bed),
+14-day insights with correlations and ranked recommendations, and a self-contained HTML
+report. Standalone Node 18+ CLI, zero dependencies, `--demo` mode needs no account.
+
 ### rewyse-onboard
 **Slash command:** `/rewyse-onboard`
 **Triggers:** "set up Rewyse AI", "first time product builder", "configure Notion integration",
@@ -183,3 +200,4 @@ All product build output goes to `output/{project-slug}/`.
 - **First time?** Run `/rewyse-onboard` to set up prerequisites and learn the pipeline.
 - **Ready to build?** Run `/build-product` to start a new product build.
 - **Need help?** Run `/rewyse-help` for Q&A, troubleshooting, or project status.
+- **Planning your day?** Run `/whoop-energy` for a circadian energy schedule from your WHOOP data.
