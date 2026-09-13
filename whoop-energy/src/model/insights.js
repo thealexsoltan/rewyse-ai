@@ -9,7 +9,7 @@
  */
 
 import { circularMeanMinutes, circularSdMinutes, fmtHHMM } from '../time.js';
-import { computeSleepDebt, computeSleepNeed, totalSleepMin } from './sleepDebt.js';
+import { computeSleepDebt, computeSleepNeed } from './sleepDebt.js';
 
 /** Default analysis window. */
 export const DEFAULT_WINDOW_DAYS = 14;
@@ -85,9 +85,12 @@ export function pearson(xs, ys) {
   const px = [];
   const py = [];
   const len = Math.min(xs?.length ?? 0, ys?.length ?? 0);
+  // `Number(null)` is 0, so blanks must be rejected before coercion — otherwise a
+  // night with no recovery/strain record would enter the sample as a real zero.
+  const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
   for (let i = 0; i < len; i += 1) {
-    const a = Number(xs[i]);
-    const b = Number(ys[i]);
+    const a = num(xs[i]);
+    const b = num(ys[i]);
     if (Number.isFinite(a) && Number.isFinite(b)) {
       px.push(a);
       py.push(b);
