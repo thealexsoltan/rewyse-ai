@@ -10,6 +10,7 @@
 #   bash rewyse-ai/team.sh dm <bot> "<message>"
 #   bash rewyse-ai/team.sh roster
 #   bash rewyse-ai/team.sh cloud <bot> "<task>"
+#   bash rewyse-ai/team.sh chat            (iMessage-style app at http://localhost:3333)
 #   bash rewyse-ai/team.sh down
 #
 # Compatible with bash 3.2+ (macOS default). Requires tmux for `up`.
@@ -237,6 +238,18 @@ cmd_cloud() {
   claude --cloud "$(printf 'You are the Rewyse bot "%s". Read rewyse-ai/agents/_shared-charter.md and rewyse-ai/agents/%s.md and follow them for this whole session.\n\nTask: %s' "$bot" "$bot" "$task")"
 }
 
+cmd_chat() {
+  need node "Install Node.js 18+ first: https://nodejs.org"
+  need claude "Install Claude Code first: https://code.claude.com/docs/en/quickstart"
+  local chat_dir="$SCRIPT_DIR/chat"
+  if [ ! -d "$chat_dir/node_modules" ]; then
+    echo -e "${BLUE}[..]${NC} First run: installing the chat app's dependencies..."
+    (cd "$chat_dir" && npm install --no-fund --no-audit) || exit 1
+  fi
+  echo -e "${BLUE}[..]${NC} Starting Claude Bots (project root: $PROJECT_ROOT)"
+  cd "$chat_dir" && REWYSE_PROJECT_ROOT="$PROJECT_ROOT" npm start
+}
+
 cmd_down() {
   need tmux "Install it with 'brew install tmux' (macOS) or your package manager."
   if ! tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -253,6 +266,7 @@ case "${1:-}" in
   dm)      shift; cmd_dm "$@" ;;
   roster)  shift; cmd_roster "$@" ;;
   cloud)   shift; cmd_cloud "$@" ;;
+  chat)    shift; cmd_chat "$@" ;;
   down)    shift; cmd_down "$@" ;;
   *)       usage ;;
 esac

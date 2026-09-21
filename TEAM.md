@@ -15,6 +15,7 @@ by piece, then walks through each setup.
 
 | Grok Bot | Claude Code equivalent | Status |
 |---|---|---|
+| The chat app: roster, DMs, group chats, approvals | `bash rewyse-ai/team.sh chat` (see Setup 0) | Shipped in this repo |
 | A Bot: name, role, job description, avatar | `.claude/agents/<name>.md`: `name`, `description`, `color`, charter body. Runs as a subagent, a teammate, or a whole session | Shipped |
 | Own cloud computer per Bot | Cloud session per bot (`claude --cloud`, claude.ai/code), or a local session per bot in tmux | Shipped, research preview for cloud |
 | Private memory per Bot | `memory: project` in the definition. Lives in `.claude/agent-memory/<name>/MEMORY.md` | Shipped |
@@ -30,10 +31,8 @@ by piece, then walks through each setup.
 | Sign into your real tools | MCP connectors (Notion, Gmail, Drive, Slack, GitHub, and the rest) | Shipped |
 | Slack as the front door | Claude Tag (Team and Enterprise plans only) | Not on Pro/Max |
 
-The one Grok Bot piece with no direct Claude match on a Pro or Max plan is a
-chat app whose main screen is a roster with animated status avatars. The
-closest views are the Projects Overview pane in the cloud and `claude agents`
-locally. Both show every bot and its state; neither is iMessage-shaped.
+The chat app in Setup 0 is the iMessage-shaped roster. Outside it, the closest
+views are the Projects Overview pane in the cloud and `claude agents` locally.
 
 ## The roster
 
@@ -50,7 +49,43 @@ All six follow `agents/_shared-charter.md`. Edit a bot's copy in
 `.claude/agents/` to change its behavior; the originals in `rewyse-ai/agents/`
 are the defaults the installer copies from.
 
-## Setup A: one terminal session per bot (closest to Grok Bot)
+## Setup 0: the chat app (the Grok Bot experience itself)
+
+```bash
+bash rewyse-ai/team.sh chat        # first run installs; then open http://localhost:3333
+```
+
+An iMessage-style window in the Claude palette. The sidebar is your roster
+with live status dots; the main pane is the conversation. What it does:
+
+- **DM any bot.** Replies stream in as bubbles. The tools it runs show as
+  small chips under the bubble, so you can see it working without reading a
+  terminal.
+- **Group chats** of two to six bots. Everyone sees every post; @mention a bot
+  to make it answer, and bots stay quiet on posts that are not their job.
+- **Bot-to-bot threads.** When one bot DMs another (through its `send_dm`
+  tool) the exchange shows up in the sidebar as "A ↔ B". You can read it or
+  type into it.
+- **Approvals.** When a bot wants to run a command or edit a file, a card with
+  Approve, Allow for session, and Deny appears in the thread. Nothing runs
+  until you answer, unless you switch that bot to Autopilot in its profile.
+- **Profiles.** Edit a bot's job, charter, model and color; read its memory
+  file; reset its session.
+- **New bot** from a form. It writes a real `.claude/agents/<id>.md`, so the
+  same bot also works in every other setup below.
+
+Under the hood every bot is one Claude Code session started through the Claude
+Agent SDK with your normal `claude` login, your project's CLAUDE.md and the
+Rewyse skills. One bot, one session, one memory, whatever thread it is in.
+Bot-to-bot chatter is hop-limited so two bots cannot loop. Details in
+`chat/README.md`.
+
+It runs on your machine because that is where Claude Code, your project
+files and your Notion token are. Vercel and similar hosts are not a fit for
+long-lived bot turns; to use it from your phone, keep it running on a machine
+that stays on and put a tunnel with auth in front of it.
+
+## Setup A: one terminal session per bot
 
 Every bot is a full, independent Claude Code session with its own context,
 named so the others can message it. They sit side by side in tmux. This is
@@ -191,9 +226,9 @@ answer a permission prompt); the charters enforce the rest.
 
 ## What is different from Grok Bot, honestly
 
-- **No single chat app with a bot roster on the home screen.** You get the
-  same roster three ways (tmux windows, the agent panel, the Projects
-  Overview) but not one iMessage-style app.
+- **The chat app is local, not a hosted product.** It runs where your Claude
+  Code login and project files are. Phone access means a tunnel, not an app
+  store.
 - **Agent teams are experimental.** Setup A avoids them entirely and is the
   most robust today. Setup B is the most convenient.
 - **Projects are still rolling out.** If Projects is not in your sidebar,

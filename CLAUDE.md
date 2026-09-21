@@ -46,8 +46,9 @@ memory in `.claude/agent-memory/<bot>/`, follow the shared rulebook in
 | image-artist | Phase 7.5, cost-gated |
 | quality-reviewer | Phase 9, read-only, routes fixes |
 
-Three ways to run them:
+Four ways to run them:
 
+- `bash rewyse-ai/team.sh chat` — iMessage-style app (roster, DMs, groups, bot-to-bot threads, approvals) at http://localhost:3333
 - `/team up` — in-session group chat (agent teams, shared task list)
 - `bash rewyse-ai/team.sh up [--rc]` — one terminal session per bot in tmux; `--rc` puts each bot in the mobile app
 - Cloud: a Claude Code Project with `agents/chief-of-staff.md` as its instructions, plus Routines for schedules
@@ -198,7 +199,7 @@ and a pipeline walkthrough with tips for best results.
 ## Scripts
 
 Rewyse AI-specific Node.js scripts live in `scripts/` within this directory.
-`team.sh` (repo root) launches, messages, and shuts down the bot team in tmux.
+`team.sh` (repo root) launches, messages, and shuts down the bot team in tmux, and starts the chat app (`chat/`).
 
 ## Output
 

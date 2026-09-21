@@ -127,9 +127,13 @@ message each other and escalate to you only for money, scope, and publishing dec
 | `image-artist` | AI images, always asks before spending |
 | `quality-reviewer` | QA scan, routes fixes to the owner |
 
-Three ways to run the team:
+Four ways to run the team:
 
 ```bash
+# The chat app: an iMessage-style window with a bot roster, DMs, group chats,
+# bot-to-bot threads you can read, and Approve / Deny cards (http://localhost:3333)
+bash rewyse-ai/team.sh chat
+
 # In one Claude Code session, as a group chat with a shared task list
 /team up
 /team dm content-writer "Generate 3 samples for hyrox-recipes"
