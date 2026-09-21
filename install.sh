@@ -157,10 +157,39 @@ create_skill "rewyse-onboard" \
   "" \
   "Read and follow the full instructions in \`rewyse-ai/rewyse-onboard/SKILL.md\`.\n\nAlso read \`rewyse-ai/rewyse-onboard/reference.md\` for setup guides and troubleshooting."
 
+create_skill "team" \
+  "Run the Rewyse bot team like a group chat — spawn named bots, DM one, start a discussion between bots, check who is online, or shut the team down." \
+  "argument-hint: [up | status | dm <bot> <message> | group <bot,bot> <topic> | down]" \
+  "Read and follow the full instructions in \`rewyse-ai/team/SKILL.md\`.\n\nThe bots are defined in \`rewyse-ai/agents/\` and follow \`rewyse-ai/agents/_shared-charter.md\`."
+
 if [ "$SKILL_COUNT" -gt 0 ]; then
   echo -e "${GREEN}[ok]${NC} Registered $SKILL_COUNT new slash commands in .claude/skills/"
 else
-  echo -e "${GREEN}[ok]${NC} All 17 slash commands already registered in .claude/skills/"
+  echo -e "${GREEN}[ok]${NC} All 18 slash commands already registered in .claude/skills/"
+fi
+
+# Register the bot team in .claude/agents/ so Claude Code can spawn each bot
+# by name (as a subagent, an agent-team teammate, or via --agent).
+# Only files with frontmatter are bots; _shared-charter.md is their rulebook
+# and stays in rewyse-ai/agents/ where the bots reference it.
+AGENTS_SRC="$SCRIPT_DIR/agents"
+AGENTS_DST="$PROJECT_ROOT/.claude/agents"
+AGENT_COUNT=0
+if [ -d "$AGENTS_SRC" ]; then
+  mkdir -p "$AGENTS_DST"
+  for agent_file in "$AGENTS_SRC"/*.md; do
+    agent_name="$(basename "$agent_file")"
+    case "$agent_name" in _*) continue ;; esac
+    if [ ! -f "$AGENTS_DST/$agent_name" ]; then
+      cp "$agent_file" "$AGENTS_DST/$agent_name"
+      AGENT_COUNT=$((AGENT_COUNT + 1))
+    fi
+  done
+fi
+if [ "$AGENT_COUNT" -gt 0 ]; then
+  echo -e "${GREEN}[ok]${NC} Registered $AGENT_COUNT bots in .claude/agents/ (edit them there to customize)"
+else
+  echo -e "${GREEN}[ok]${NC} All bots already registered in .claude/agents/"
 fi
 
 # Add Rewyse AI registration to root CLAUDE.md if not already present
@@ -185,7 +214,11 @@ See `rewyse-ai/CLAUDE.md` for full pipeline documentation.
 **All commands:** `/build-product`, `/product-idea`, `/build-database`, `/expert-profile`,
 `/content-blueprint`, `/write-prompt`, `/test-content`, `/generate-content`,
 `/generate-images`, `/design-product`, `/product-qa`, `/product-expand`, `/home-page`,
-`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`
+`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`, `/team`
+
+**Bot team:** `/team up` spawns named bots (chief-of-staff, product-strategist, notion-builder,
+content-writer, image-artist, quality-reviewer) that message each other. Terminal roster:
+`bash rewyse-ai/team.sh up`. See `rewyse-ai/TEAM.md`.
 REGISTRATION
     echo -e "${GREEN}[ok]${NC} Added Rewyse AI registration to CLAUDE.md"
   fi
@@ -205,7 +238,11 @@ See `rewyse-ai/CLAUDE.md` for full pipeline documentation.
 **All commands:** `/build-product`, `/product-idea`, `/build-database`, `/expert-profile`,
 `/content-blueprint`, `/write-prompt`, `/test-content`, `/generate-content`,
 `/generate-images`, `/design-product`, `/product-qa`, `/product-expand`, `/home-page`,
-`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`
+`/subpage-views`, `/prompt-generator`, `/rewyse-help`, `/rewyse-onboard`, `/team`
+
+**Bot team:** `/team up` spawns named bots (chief-of-staff, product-strategist, notion-builder,
+content-writer, image-artist, quality-reviewer) that message each other. Terminal roster:
+`bash rewyse-ai/team.sh up`. See `rewyse-ai/TEAM.md`.
 NEWCLAUDE
   echo -e "${GREEN}[ok]${NC} Created CLAUDE.md with Rewyse AI registration"
 fi
@@ -221,6 +258,8 @@ echo "  1. Open Claude Code in this project directory"
 echo "  2. Run /rewyse-onboard to set up prerequisites"
 echo "     (Notion integration, NOTION_TOKEN, Node.js)"
 echo "  3. Run /build-product to create your first digital product"
+echo "  4. Want a team of bots that talk to each other? Run /team up,"
+echo "     or bash rewyse-ai/team.sh up for one terminal session per bot"
 echo ""
 echo "  Need help? Run /rewyse-help anytime."
 echo ""

@@ -112,6 +112,42 @@ Every phase pauses for your approval. You can go back, revise, or skip ahead. If
 
 ---
 
+## Run It as a Team of Bots
+
+If you like how Grok Bot's always-on teammates work, the same experience runs on Claude Code.
+Rewyse ships six named bots, each owning part of the pipeline, each with its own memory, that
+message each other and escalate to you only for money, scope, and publishing decisions.
+
+| Bot | Owns |
+|-----|------|
+| `chief-of-staff` | The one you talk to. Routes work, tracks tasks, reports back. |
+| `product-strategist` | Idea, niche, persona, blueprint, next products |
+| `notion-builder` | Database, views, home page, design |
+| `content-writer` | Prompt, samples, batch generation |
+| `image-artist` | AI images, always asks before spending |
+| `quality-reviewer` | QA scan, routes fixes to the owner |
+
+Three ways to run the team:
+
+```bash
+# In one Claude Code session, as a group chat with a shared task list
+/team up
+/team dm content-writer "Generate 3 samples for hyrox-recipes"
+/team group notion-builder,quality-reviewer "Is the homepage layout ready to ship?"
+
+# One full terminal session per bot, side by side in tmux (add --rc to get every bot in the mobile app)
+bash rewyse-ai/team.sh up --rc
+bash rewyse-ai/team.sh dm notion-builder "Build the database for hyrox-recipes"
+bash rewyse-ai/team.sh down
+
+# Always-on in the cloud: a Claude Code Project + Routines (no laptop needed)
+bash rewyse-ai/team.sh cloud content-writer "Generate all Draft entries for hyrox-recipes"
+```
+
+Full guide, including the feature-by-feature comparison with Grok Bot: [TEAM.md](TEAM.md).
+
+---
+
 ## All Commands
 
 | Command | What It Does |
@@ -129,6 +165,7 @@ Every phase pauses for your approval. You can go back, revise, or skip ahead. If
 | `/product-qa` | Run quality assurance scan |
 | `/product-expand` | Suggest complementary products |
 | `/rewyse-help` | Ask questions, troubleshoot, check status |
+| `/team` | Run the bot team: `up`, `status`, `dm`, `group`, `down` |
 | `/rewyse-onboard` | First-time setup walkthrough |
 
 ---
