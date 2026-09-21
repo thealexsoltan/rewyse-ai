@@ -31,6 +31,28 @@ to run the full pipeline.
 - **rewyse-help** — Q&A, troubleshooting, and project status for the pipeline
 - **rewyse-onboard** — First-time setup guide and readiness check
 
+## Bot Team (Grok Bot-style)
+
+Six named bots in `agents/` that each own part of the pipeline, keep private
+memory in `.claude/agent-memory/<bot>/`, follow the shared rulebook in
+`agents/_shared-charter.md`, and message each other by name. See `TEAM.md`.
+
+| Bot | Owns |
+|-----|------|
+| chief-of-staff | Routing, task list, status. The one you talk to. |
+| product-strategist | Phases 1, 3, 4, 10 |
+| notion-builder | Phases 2, 8, home pages, subpage views |
+| content-writer | Phases 5, 6, 7 |
+| image-artist | Phase 7.5, cost-gated |
+| quality-reviewer | Phase 9, read-only, routes fixes |
+
+Four ways to run them:
+
+- `bash rewyse-ai/team.sh chat` — iMessage-style app (roster, DMs, groups, bot-to-bot threads, approvals) at http://localhost:3333
+- `/team up` — in-session group chat (agent teams, shared task list)
+- `bash rewyse-ai/team.sh up [--rc]` — one terminal session per bot in tmux; `--rc` puts each bot in the mobile app
+- Cloud: a Claude Code Project with `agents/chief-of-staff.md` as its instructions, plus Routines for schedules
+
 ## Skills
 
 ### build-product
@@ -151,6 +173,15 @@ list views, deletes old views, and hides database source titles.
 why something failed, and what to do next. Context-aware of active projects. Three modes:
 Ask (general Q&A), Diagnose (troubleshoot issues), Status (project dashboard).
 
+### team
+**Slash command:** `/team`
+**Triggers:** "spin up the team", "ask the writer to", "DM the strategist", "get the builder
+and reviewer to discuss", "who is online", "team status", "shut the team down"
+**Description:** Runs the bot team like a group chat. `up` spawns the named bots as teammates,
+`dm <bot> <message>` messages one, `group <bot,bot> <topic>` starts a discussion between bots,
+`status` shows the roster and task list, `down` shuts everyone down. Anything else is a goal
+the chief of staff routes to the right bot.
+
 ### rewyse-onboard
 **Slash command:** `/rewyse-onboard`
 **Triggers:** "set up Rewyse AI", "first time product builder", "configure Notion integration",
@@ -168,6 +199,7 @@ and a pipeline walkthrough with tips for best results.
 ## Scripts
 
 Rewyse AI-specific Node.js scripts live in `scripts/` within this directory.
+`team.sh` (repo root) launches, messages, and shuts down the bot team in tmux, and starts the chat app (`chat/`).
 
 ## Output
 

@@ -3,3 +3,6 @@ scripts/
 .DS_Store
 .env
 *.log
+chat/node_modules/
+chat/dist/
+chat/data/
