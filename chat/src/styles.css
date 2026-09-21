@@ -172,6 +172,23 @@ a { color: var(--blue); }
 .dot.waiting { background: var(--accent); }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: 0.6; } }
 
+/* crab mascot */
+.avatar .crab { width: 86%; height: 86%; overflow: visible; }
+.crab .claw { transform-box: fill-box; transform-origin: 50% 90%; }
+.crab.working .claw.left { animation: wave-l 0.9s ease-in-out infinite; }
+.crab.working .claw.right { animation: wave-r 0.9s ease-in-out infinite 0.45s; }
+.crab.waiting .claw.right { transform: rotate(-40deg) translate(2px, -3px); }
+.crab.waiting .claw.left { transform: rotate(8deg); }
+.crab.idle .eyes { animation: blink 5s steps(1) infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes wave-l { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(22deg) translateY(-2px); } }
+@keyframes wave-r { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-22deg) translateY(-2px); } }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 94%, 98% { transform: scaleY(0.1); } }
+.avatar.group { background: var(--bg-3); position: relative; }
+.avatar.group .crab.pair { position: absolute; width: 62%; height: 62%; }
+.avatar.group .crab.pair.a { left: 4%; top: 8%; }
+.avatar.group .crab.pair.b { right: 4%; bottom: 6%; }
+@media (prefers-reduced-motion: reduce) { .crab .claw, .crab .eyes { animation: none !important; } }
+
 .stack { display: inline-flex; }
 .stack .avatar { margin-left: -12px; border: 2px solid var(--bg-2); }
 .stack .avatar:first-child { margin-left: 0; }

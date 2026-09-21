@@ -30,13 +30,59 @@ function dayLabel(ts: number): string {
   return d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
 
+/**
+ * The crab mascot. One per bot, tinted with the bot's color.
+ * Claws wave while the bot is working; the right claw stays raised while
+ * it is waiting on you; it blinks now and then when idle.
+ */
+export function Crab({ color, status, className }: { color: string; status?: BotState["status"]; className?: string }) {
+  return (
+    <svg className={`crab ${status ?? "idle"} ${className ?? ""}`} viewBox="0 0 64 64" aria-hidden="true">
+      {/* legs */}
+      <g className="legs" stroke={color} strokeWidth="3" strokeLinecap="round" fill="none">
+        <path d="M18 44 L9 50" /><path d="M20 49 L13 57" /><path d="M46 44 L55 50" /><path d="M44 49 L51 57" />
+      </g>
+      {/* claws */}
+      <g className="claw left" fill={color}>
+        <path d="M17 33 C9 33 5 27 8 22 C10 18 15 18 17 22 L14 25 L18 27 Z" />
+        <circle cx="17" cy="33" r="4" />
+      </g>
+      <g className="claw right" fill={color}>
+        <path d="M47 33 C55 33 59 27 56 22 C54 18 49 18 47 22 L50 25 L46 27 Z" />
+        <circle cx="47" cy="33" r="4" />
+      </g>
+      {/* eye stalks */}
+      <g stroke={color} strokeWidth="3" strokeLinecap="round">
+        <path d="M26 30 L25 20" /><path d="M38 30 L39 20" />
+      </g>
+      {/* body */}
+      <ellipse cx="32" cy="38" rx="17" ry="12" fill={color} />
+      <ellipse cx="32" cy="36" rx="14" ry="8" fill="rgba(250,249,245,0.16)" />
+      {/* eyes */}
+      <g className="eyes">
+        <circle cx="25" cy="19" r="4.2" fill="#faf9f5" /><circle cx="39" cy="19" r="4.2" fill="#faf9f5" />
+        <circle className="pupil" cx="26" cy="19.5" r="2" fill="#141413" /><circle className="pupil" cx="40" cy="19.5" r="2" fill="#141413" />
+      </g>
+      {/* smile */}
+      <path d="M27 41 Q32 45 37 41" stroke="#141413" strokeWidth="1.8" strokeLinecap="round" fill="none" opacity="0.65" />
+    </svg>
+  );
+}
+
 export function Avatar({ bot, size, status, you, group }: { bot?: Bot; size?: "sm" | "lg"; status?: BotState["status"]; you?: boolean; group?: boolean }) {
   const cls = `avatar ${size ?? ""} ${you ? "you" : ""} ${group ? "group" : ""}`;
   if (you) return <span className={cls}>You</span>;
-  if (group || !bot) return <span className={cls}>👥</span>;
+  if (group || !bot) {
+    return (
+      <span className={cls} title="Group">
+        <Crab color="var(--ink-3)" className="pair a" />
+        <Crab color="var(--accent)" className="pair b" />
+      </span>
+    );
+  }
   return (
-    <span className={cls} style={{ background: colorVar(bot.color) }} title={bot.name}>
-      {initials(bot.name)}
+    <span className={cls} style={{ background: `color-mix(in srgb, ${colorVar(bot.color)} 18%, var(--bg-2))` }} title={`${bot.name} · ${status ?? "idle"}`}>
+      <Crab color={colorVar(bot.color)} status={status} />
       {status ? <span className={`dot ${status}`} /> : null}
     </span>
   );
