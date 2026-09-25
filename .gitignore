@@ -1,5 +1,8 @@
 output/
-scripts/
+scripts/*
+# ...but the shipped pipeline scripts are tracked.
+!scripts/transcribe-channel.mjs
+!scripts/transcribe-channel.test.mjs
 .DS_Store
 .env
 *.log
