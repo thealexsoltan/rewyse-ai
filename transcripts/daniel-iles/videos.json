@@ -5,8 +5,9 @@
     "channelId": "UCTt7n8GFS6x_Tc_nAzSiK8Q",
     "url": "https://www.youtube.com/@danielilesbiz"
   },
-  "videoCount": 219,
+  "videoCount": 235,
   "source": "yt-dlp --flat-playlist over the /videos, /shorts and /streams tabs",
+  "lastCheckedAt": "2026-09-25",
   "videos": [
     {
       "videoId": "jm14bVak6rA",
@@ -511,6 +512,69 @@
       "url": "https://www.youtube.com/watch?v=ggukLlqtJ7s",
       "tab": "videos",
       "durationSeconds": 765
+    },
+    {
+      "videoId": "AmXrrw8OGa0",
+      "title": "Every revenue level from $10k to $5M / month explained (51 minute breakdown)",
+      "url": "https://www.youtube.com/watch?v=AmXrrw8OGa0",
+      "tab": "videos",
+      "durationSeconds": 3112
+    },
+    {
+      "videoId": "yJFUKhvyJK8",
+      "title": "If you are serious about making generational wealth - you need to move",
+      "url": "https://www.youtube.com/watch?v=yJFUKhvyJK8",
+      "tab": "videos",
+      "durationSeconds": 328
+    },
+    {
+      "videoId": "MCPvsVEAvoQ",
+      "title": "My $5 million per month sales system",
+      "url": "https://www.youtube.com/watch?v=MCPvsVEAvoQ",
+      "tab": "videos",
+      "durationSeconds": 1024
+    },
+    {
+      "videoId": "2clMOGeFzJQ",
+      "title": "$10k/mo vs $1m/mo paid ads",
+      "url": "https://www.youtube.com/watch?v=2clMOGeFzJQ",
+      "tab": "videos",
+      "durationSeconds": 1173
+    },
+    {
+      "videoId": "AfvS5Tkhbis",
+      "title": "Explaining the $1m/mo offer",
+      "url": "https://www.youtube.com/watch?v=AfvS5Tkhbis",
+      "tab": "videos",
+      "durationSeconds": 2249
+    },
+    {
+      "videoId": "dHCGD1Xth3Q",
+      "title": "The truth about running a business with your bros",
+      "url": "https://www.youtube.com/watch?v=dHCGD1Xth3Q",
+      "tab": "videos",
+      "durationSeconds": 490
+    },
+    {
+      "videoId": "segcbjg2cGs",
+      "title": "Buying XP in real life",
+      "url": "https://www.youtube.com/watch?v=segcbjg2cGs",
+      "tab": "videos",
+      "durationSeconds": 476
+    },
+    {
+      "videoId": "-l4SKfxstC4",
+      "title": "The disappointment of making $5 million per month",
+      "url": "https://www.youtube.com/watch?v=-l4SKfxstC4",
+      "tab": "videos",
+      "durationSeconds": 513
+    },
+    {
+      "videoId": "MBj6qrUx9W8",
+      "title": "My $5M/mo Sales Onboarding Tutorial (internal company vid)",
+      "url": "https://www.youtube.com/watch?v=MBj6qrUx9W8",
+      "tab": "videos",
+      "durationSeconds": 766
     },
     {
       "videoId": "Fky4kj6p_Yc",
@@ -1538,6 +1602,55 @@
       "videoId": "cw_kmtkCQTE",
       "title": "8 questions improved my business by 2,629%",
       "url": "https://www.youtube.com/watch?v=cw_kmtkCQTE",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "nXrpgRc12ac",
+      "title": "The Best Businesses Practice What They Preach",
+      "url": "https://www.youtube.com/watch?v=nXrpgRc12ac",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "ZkeW0UsdWck",
+      "title": "Stop optimizing with AI start doing this instead",
+      "url": "https://www.youtube.com/watch?v=ZkeW0UsdWck",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "xvf9RNxopXE",
+      "title": "My UGC system",
+      "url": "https://www.youtube.com/watch?v=xvf9RNxopXE",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "PsIqhkz5QZY",
+      "title": "Don’t sell to broke people",
+      "url": "https://www.youtube.com/watch?v=PsIqhkz5QZY",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "2p9hFFB3Sgs",
+      "title": "Don't sell to broke people...",
+      "url": "https://www.youtube.com/watch?v=2p9hFFB3Sgs",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "mFb5LtbwHUQ",
+      "title": "Why the biggest businesses always win...",
+      "url": "https://www.youtube.com/watch?v=mFb5LtbwHUQ",
+      "tab": "shorts",
+      "durationSeconds": null
+    },
+    {
+      "videoId": "SddOgMRZosc",
+      "title": "The best performing ads don’t actually sell anything",
+      "url": "https://www.youtube.com/watch?v=SddOgMRZosc",
       "tab": "shorts",
       "durationSeconds": null
     }
